@@ -37,6 +37,12 @@ struct Sol{
 } sol_tablero[50];
 static short cant_sol_tablero{};
 
+struct Proyectil {
+	short x, y, mov_x;
+} *proyectil;
+
+short cant_proy_tablero{};
+
 struct {
 	short plant, recarga, costo;
 }static semillero[LIM_SEM];
@@ -56,8 +62,10 @@ void seleccionar_planta(ALLEGRO_EVENT);
 
 void funcion_sol(short, short, Sol&);
 void funcion_planta();
+void muerte_planta(short, short);
 
 void generar_sol_recolect(short, short, short, Sol&);
+void generar_proyectil(short, Proyectil&);
 
 float animacion_sol(Sol&);
 short animacion_planta(short pos_x, short pos_y);
@@ -106,6 +114,7 @@ int main() {
 		* pala_interfaz = al_load_bitmap("Sprites/Extra/Shovel_Hud.png"),
 		* fondo_soles = al_load_bitmap("Sprites/Extra/Sun_Counter.png"),
 		* sol_recol = al_load_bitmap("Sprites/Extra/Sun.png"),
+		* guisante = al_load_bitmap("Sprites/Bullets/Bullet_Pea.png"),
 		* zombie_basico = al_load_bitmap("Sprites/Zombies/Zombie_Basic.png"),
 		* fondo_casa_dia = al_load_bitmap("Sprites/Daylight_Playground.png");
 
@@ -157,15 +166,12 @@ int main() {
 				}
 			}
 
-			//Dibujar soles en el tablero
-			for (int i{}; i < cant_sol_tablero; i++) {
-				if (sol_tablero[i].estado_act <= 1) {
-					al_draw_bitmap(sol_recol, sol_tablero[i].estado.anim.x + sol_tablero[i].estado.anim.mov_x, animacion_sol(sol_tablero[i]), 0);
+			//Dibujar proyectil en el tablero
+			/* for (int i{}; i < cant_sol_tablero; i++) {
+				if (sol_tablero[x].estado_act <= 1) {
+					al_draw_bitmap(guisante, sol_tablero[i].estado.anim.x + sol_tablero[i].estado.anim.mov_x, animacion_sol(sol_tablero[i]), 0);
 				}
-				else {
-					al_draw_bitmap(sol_recol, sol_tablero[i].estado.quiet.x, sol_tablero[i].estado.quiet.y, 0);
-				}
-			}
+			}*/
 
 			//Dibujar planta elegida en el cursor
 
@@ -176,6 +182,34 @@ int main() {
 				else if (planta_elegida == -1) {
 					al_draw_bitmap_region(pala_interfaz, 110, 0, 110, 110, LIM_SEM * 110 + 150, 0, 0);
 					al_draw_bitmap(pala_cursor, mouse_x - 55, mouse_y - 55, 0);
+				}
+			}
+			//Dibujar soles en el tablero
+			for (int i{}; i < cant_sol_tablero; i++) {
+				if (sol_tablero[i].estado_act <= 1) {
+					al_draw_bitmap(sol_recol, sol_tablero[i].estado.anim.x + sol_tablero[i].estado.anim.mov_x, animacion_sol(sol_tablero[i]), 0);
+				}
+				else if (sol_tablero[i].estado_act != 3) {
+					al_draw_bitmap(sol_recol, sol_tablero[i].estado.quiet.x, sol_tablero[i].estado.quiet.y, 0);
+				}
+				else {
+					if (sol_tablero[i].estado.recol.x > 55 && sol_tablero[i].estado.recol.y > 30) {
+						if (sol_tablero[i].estado.recol.x < sol_tablero[i].estado.recol.mov_x / 5 ||
+							sol_tablero[i].estado.recol.y < sol_tablero[i].estado.recol.mov_y / 5) {
+							sol_tablero[i].estado.recol.x -= sol_tablero[i].estado.recol.mov_x / 90;
+							sol_tablero[i].estado.recol.y -= sol_tablero[i].estado.recol.mov_y / 90;
+						}
+						else if (sol_tablero[i].estado.recol.x < sol_tablero[i].estado.recol.mov_x / 3 ||
+							sol_tablero[i].estado.recol.y < sol_tablero[i].estado.recol.mov_y / 3) {
+							sol_tablero[i].estado.recol.x -= sol_tablero[i].estado.recol.mov_x / 50;
+							sol_tablero[i].estado.recol.y -= sol_tablero[i].estado.recol.mov_y / 50;
+						}
+						else {
+							sol_tablero[i].estado.recol.x -= sol_tablero[i].estado.recol.mov_x / 30;
+							sol_tablero[i].estado.recol.y -= sol_tablero[i].estado.recol.mov_y / 30;
+						}
+					}
+					al_draw_bitmap(sol_recol, sol_tablero[i].estado.recol.x, sol_tablero[i].estado.recol.y, 0);
 				}
 			}
 
@@ -294,6 +328,7 @@ void plantar_planta(ALLEGRO_EVENT pos) {
 			if (planta_elegida > 0 && !planta[pos_x][pos_y].pos) {
 				planta[pos_x][pos_y].pos = planta_elegida;
 				std::cout << "PLANTA " << planta_elegida << " PLANTADA EN \t[" << pos_x << "][" << pos_y << "]" << std::endl;
+				
 			}		
 		}
 		//DESPLANTAR UNA PLANTA
@@ -305,44 +340,61 @@ void plantar_planta(ALLEGRO_EVENT pos) {
 	}
 }
 
-void funcion_sol(short mouse_x, short mouse_y, Sol &sol) {
+void funcion_sol(short mouse_x, short mouse_y, Sol& sol) {
 	short x, y;
-	switch (sol.estado_act) {
-	case 0:
-		y = (short)animacion_sol(sol);
-		x = sol.estado.anim.x + sol.estado.anim.mov_x;
-		break;
-	case 1:
-		y = (short)animacion_sol(sol);
-		x = sol.estado.anim.x + (short)sol.estado.anim.mov_x;
-		sol.estado.quiet.x = x;
-		sol.estado.quiet.y = y;
-		sol.estado_act = 2;
-		break;
-	default:
-		x = sol.estado.quiet.x;
-		y = sol.estado.quiet.y;
-		break;
-	}
-	if (sol.estado_act != 3 && mouse_x > x - 60 && mouse_x < x + 60 && mouse_y > y - 60 && mouse_y < y + 60) {
-		soles_guard += sol.cant;
-		std::cout << "SOL RECOLECTADO" << std::endl;
-		sol.estado.recol.x = x;
-		sol.estado.recol.y = y;
-		sol.estado.recol.mov_x = x - 10;
-		sol.estado.recol.mov_y = y + 10;
-		sol.estado_act = 3;
+	if (sol.estado_act != 3) {
+		switch (sol.estado_act) {
+		case 0:
+			y = (short)animacion_sol(sol);
+			x = sol.estado.anim.x + sol.estado.anim.mov_x;
+			break;
+		case 1:
+			y = (short)animacion_sol(sol);
+			x = sol.estado.anim.x + (short)sol.estado.anim.mov_x;
+			sol.estado.quiet.x = x;
+			sol.estado.quiet.y = y;
+			sol.estado_act = 2;
+			break;
+		case 2:
+			x = sol.estado.quiet.x;
+			y = sol.estado.quiet.y;
+			break;
+		}
+		if (mouse_x > x - 60 && mouse_x < x + 60 && mouse_y > y - 60 && mouse_y < y + 60) {
+			soles_guard += sol.cant;
+			std::cout << "SOL RECOLECTADO" << std::endl;
+			sol.estado.recol.x = x;
+			sol.estado.recol.y = y;
+			sol.estado.recol.mov_x = x - 50;
+			sol.estado.recol.mov_y = y - 30;
+			sol.estado_act = 3;
+
+		}
 	}
 }
 
 void funcion_planta() {
+	int cantZombie = 1;
 	for (int x{}; x < CAS_X; x++) {
 		for (int y{}; y < CAS_Y; y++) {
 			if (planta[x][y].pos) {
 				switch (planta[x][y].pos) {
+				case 1://LANZAGUISANTES
+					if (planta[x][y].estado == 0 && cantZombie == 1) {
+						planta[x][y].tiemp++;
+						planta[x][y].estado = 1;
+						std::cout << "Zombie en fila [" << y << "]" << std::endl;
+					}else if(planta[x][y].estado == 1){
+						planta[x][y].tiemp++;
+						if (planta[x][y].tiemp >= 2) {
+							proyectil = new Proyectil;
+							generar_proyectil(x * 100 + 195, *proyectil);
+						}
+					}
+					break;
 				case 2://GIRASOL
 					if (planta[x][y].estado == 1) {
-						//animación
+						//animaciÃ³n
 						if (planta[x][y].animacion < 3) planta[x][y].animacion++;
 						//Generar soles
 						if (planta[x][y].tiemp > 5 + rand() % 3) {
@@ -353,7 +405,7 @@ void funcion_planta() {
 						}
 					}
 					else if (planta[x][y].estado == 0) {
-						//animación planta
+						//animaciÃ³n planta
 						if (planta[x][y].animacion < 3) planta[x][y].animacion++;
 						else planta[x][y].animacion = 0;
 						//cambio de estado: soles
@@ -365,6 +417,22 @@ void funcion_planta() {
 						}
 					}
 					break;
+
+				case 4://NUEZ
+					if ( planta[x][y].pv > 53) {
+						planta[x][y].estado = 1;
+					}
+					else if(planta[x][y].pv > 31 && planta[x][y].pv <= 53) {
+						planta[x][y].estado = 2;
+					}
+					else if (planta[x][y].pv > 10 && planta[x][y].pv <= 31) {
+						planta[x][y].estado = 3;
+					}
+					else {
+						muerte_planta(x, y);
+					}
+					break;
+
 				case 5://PAPAPUM
 					if (planta[x][y].estado == 0 && planta[x][y].tiemp >= 80) {
 						planta[x][y].tiemp = 0;
@@ -389,22 +457,23 @@ short animacion_planta(short x, short y) {
 			//NORMAL
 			return planta[x][y].animacion * 90;
 		case 1:
-			//ANIMACIÓN SOLES
+			//ANIMACIÃ“N SOLES
 			return planta[x][y].animacion * 90 + 360;
 		}
 		break;
 	case 4://NUEZ
-		//MÁS DE 50%
-		if (planta[x][y].pv > 40) {
+		switch (planta[x][y].estado) {
+		case 0:
+			//NORMAL
 			return 0;
-		}
-		else if (planta[x][y].pv > 28 && planta[x][y].pv <= 40) {
+		case 1:
+			//POCO DAÃ‘ADA
 			return 90;
-		}
-		else if (planta[x][y].pv > 8 && planta[x][y].pv <= 28) {
+		case 2:
+			//DAÃ‘ADA
 			return 180;
-		}
-		else {
+		case 3:
+			//MUY DAÃ‘ADA
 			return 270;
 		}
 		break;
@@ -453,4 +522,19 @@ void generar_sol_recolect(short pos_x, short pos_y, short cant, Sol &sol) {
 	sol.estado.anim.d = rand() % 2;
 	sol.estado.anim.mov_x = 0;
 	cant_sol_tablero++;
+}
+void generar_proyectil(short pos_x, Proyectil &proyectil) {
+	proyectil.x = pos_x + 5;
+	cant_proy_tablero++;
+	std::cout << "Proyectil generado en [" << pos_x << "]" << std::endl;
+
+}
+
+void muerte_planta(short x, short y) {
+	planta[x][y].pos = 0;
+	planta[x][y].pv = 0;
+	planta[x][y].tiemp = 0;
+	planta[x][y].estado = 0;
+	planta[x][y].tiemp_evento = 0;
+	planta[x][y].animacion = 0;
 }

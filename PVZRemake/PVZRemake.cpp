@@ -14,15 +14,16 @@
 #define POS_X 1
 #define LIM_SEM 7
 #define LIM_F_PLANT 8
+#define LIM_F_EXPLO 4
 #define CANT_PLANT 8
 #define RESOL_X 1280
 #define RESOL_Y 720
 
 /*----------CONSTANTES-PLANTAS--------------------------------------------------------------------------------------------*/
 
-const short COST_PLANTA[CANT_PLANT + 1]{ 0, 100, 50,150, 50, 25,175,150,200 };
-const short PV_PLANTA[CANT_PLANT + 1]{ 0,   8,  8, 20,135,  6,  8,  8,  8 };
-const short REC_PLANTA[CANT_PLANT + 1]{ 0, 27, 33,240, 120, 120, 40, 33, 40 };
+const short COST_PLANTA[CANT_PLANT + 1]	{ 0, 100, 50, 150,  50,  25, 175, 150, 200 };
+const short PV_PLANTA[CANT_PLANT + 1]	{ 0,   8,  8,  20, 135,   6,   8,   8,   8 };
+const short REC_PLANTA[CANT_PLANT + 1]	{ 0,  27, 33, 240, 120, 120,  40,  33,  40 };
 
 /*----------VARIABLES_GLOBALES--------------------------------------------------------------------------------------------*/
 
@@ -30,7 +31,7 @@ static short planta_elegida{ 0 }, semillero_elegido{ 0 }, frames{};
 static bool bucle{ 1 };
 static short cont, soles_guard{ 5000 }, plantas_en_semillero[LIM_SEM];
 static short cant_sol_tablero{};
-static short cant_zombi[CAS_Y], cant_proy[CAS_Y];
+static short cant_zombi[CAS_Y]{0,1,1,1,0}, cant_proy[CAS_Y];
 
 /*----------ESTRUCTURAS---------------------------------------------------------------------------------------------------*/
 
@@ -61,7 +62,10 @@ struct Sol {
 }			static* sol_tablero;
 
 struct Proyectil {
-	short x, tipo;
+	short tiempo_ev;
+	float x;
+	Proyectil* ant_proy, * sig_proy;
+	short tipo;
 }	static* proyectil[CAS_Y];
 
 struct Semillero {
@@ -96,8 +100,8 @@ void generar_sol_recolect(short, short, short);
 float animacion_sol(Sol&);
 
 //PROYECTILES
-void generar_proyectil(short, Proyectil&);
-void mover_proyectil();
+void generar_proyectil(Proyectil*, int, short, short);
+bool mover_proyectil(Proyectil&, short);
 
 //EXTRA
 void funcion_semillero();
@@ -113,6 +117,11 @@ int main() {
 	sol_tablero->ant_sol = sol_tablero;
 	sol_tablero->sig_sol = NULL;
 	sol_tablero->estado_act = 4;
+	for (int i{}; i < CAS_Y; i++) {
+		proyectil[i] = new Proyectil;
+		proyectil[i]->ant_proy = proyectil[i];
+		proyectil[i]->sig_proy = NULL;
+	}
 
 	//iniciar matriz plantas
 	for (int y{}; y < CAS_Y; y++) {
@@ -143,7 +152,7 @@ int main() {
 	if (!al_install_keyboard()) return -1;
 	if (!al_install_mouse()) return -1;
 
-	al_set_new_display_flags(ALLEGRO_FULLSCREEN);
+	//al_set_new_display_flags(ALLEGRO_FULLSCREEN);
 
 	ALLEGRO_DISPLAY* display = al_create_display(RESOL_X, RESOL_Y);
 	ALLEGRO_EVENT_QUEUE* cola_eventos = al_create_event_queue();
@@ -173,9 +182,13 @@ int main() {
 
 	while (bucle) {
 		al_wait_for_event(cola_eventos, &eventos);
+		//Registrar posición del mouse
+		if (eventos.type == ALLEGRO_EVENT_MOUSE_AXES) {
+			mouse_x = eventos.mouse.x;
+			mouse_y = eventos.mouse.y;
+		}
 		switch (eventos.type) {
-
-			//El juego avanza
+		//El juego avanza
 		case ALLEGRO_EVENT_TIMER:
 			if (!(frames % 15)) {
 				Sol* ptr_sol = NULL, * anterior_sol = NULL;
@@ -209,16 +222,28 @@ int main() {
 						if (planta[x][y].pos >= 0 && planta[x][y].pos <= 8) {
 							al_draw_bitmap_region(plantas_dia_bitmap, (planta[x][y].pos - 1) * 90, animacion_planta(x, y), 90, 90, x * 100 + 195, y * 100 + 165, 0);
 						}
+						if (planta[x][y].pos == 3 && planta[x][y].estado == 1) {
+							al_draw_bitmap_region(explosion, (int(planta[x][y].animacion / LIM_F_EXPLO)) * 300, 0, 300, 300, x * 100 + 95, y * 100 + 65, 0);
+						}
 					}
 				}
 			}
 
-			//Dibujar proyectil en el tablero
-			/* for (int i{}; i < cant_sol_tablero; i++) {
-				if (sol_tablero[x].estado_act <= 1) {
-					al_draw_bitmap(guisante, sol_tablero[i].estado.anim.x + sol_tablero[i].estado.anim.mov_x, animacion_sol(sol_tablero[i]), 0);
+			//Dibujar proyectiles en el tablero
+			for (int y{}; y < CAS_Y; y++) {
+				Proyectil* ptr_proy = NULL, *ant_proy = NULL;
+				ptr_proy = proyectil[y];
+				for (int i{}; i < cant_proy[y]; i++) {
+					ant_proy = ptr_proy;
+					ptr_proy = ptr_proy->sig_proy;
+					if (mover_proyectil(*ptr_proy, y)) {
+						ptr_proy = ant_proy;
+						i--;
+						continue;
+					}
+					al_draw_bitmap_region(guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, y * 100 + 189 + rand() % 3, 0);
 				}
-			}*/
+			}
 
 			//Dibujar soles en el tablero
 			if (cant_sol_tablero > 0) {
@@ -302,14 +327,6 @@ int main() {
 		case ALLEGRO_EVENT_MOUSE_BUTTON_DOWN:
 			registrar_mouse(eventos);
 			break;
-
-			//Registrar posición del mouse
-		case ALLEGRO_EVENT_MOUSE_AXES:
-			mouse_x = eventos.mouse.x;
-			mouse_y = eventos.mouse.y;
-			break;
-		}
-		if (eventos.type == ALLEGRO_EVENT_TIMER) {
 		}
 	}
 
@@ -319,7 +336,15 @@ int main() {
 	al_destroy_display(display);
 
 	al_destroy_bitmap(fondo_casa_dia);
+	al_destroy_bitmap(plantas_dia_bitmap);
 	al_destroy_bitmap(semillero_bitmap);
+	al_destroy_bitmap(pala_interfaz);
+	al_destroy_bitmap(pala_cursor);
+	al_destroy_bitmap(fondo_soles);
+	al_destroy_bitmap(sol_recol);
+	al_destroy_bitmap(semillero_recarga);
+	al_destroy_bitmap(explosion);
+	al_destroy_bitmap(guisante);
 	al_destroy_bitmap(zombie_basico);
 
 	std::cout << "ELIMINACION DE RESERVAS SOLES:" << std::endl;
@@ -336,6 +361,23 @@ int main() {
 	else {
 		std::cout << "SOL TABLERO ELIMINADO" << std::endl;
 		delete sol_tablero;
+	}
+
+	std::cout << "ELIMINACION DE GUISANTES EN LA PANTALLA DEL JUEGO" << std::endl;
+	for (int i{}; i < CAS_Y; i++) {
+		if (cant_proy[i]) {
+			Proyectil* elim_proy = NULL, * sig_elim_proy = NULL;
+			elim_proy = proyectil[i];
+			for (int j{}; j < cant_proy[i]; j++) {
+				sig_elim_proy = elim_proy->sig_proy;
+				delete elim_proy;
+				std::cout << "POSICION " << j << " DE " << i << " ELIMINADA" << std::endl;
+				elim_proy = sig_elim_proy;
+			}
+		}else{
+			std::cout << "PROYECTIL" << i << "ELIMINADO" << std::endl;
+			delete proyectil[i];
+		}
 	}
 }
 
@@ -400,7 +442,6 @@ void eliminar_planta(Planta& planta) {
 }
 
 void funcion_planta() {
-	int cantZombie = 1;
 	for (int x{}; x < CAS_X; x++) {
 		for (int y{}; y < CAS_Y; y++) {
 			if (planta[x][y].pos) {
@@ -410,7 +451,19 @@ void funcion_planta() {
 				}
 				switch (planta[x][y].pos) {
 				case 1://LANZAGUISANTES
-					mover_proyectil();
+					if (planta[x][y].estado == 0 && cant_zombi[y] > 0 && planta[x][y].tiemp >= 5 + rand() % 2) {
+						planta[x][y].tiemp = -1;
+						planta[x][y].estado = 1;
+						planta[x][y].animacion = 0;
+					}
+					if (planta[x][y].estado == 1) {
+						if (planta[x][y].tiemp >= 1) {
+							generar_proyectil(proyectil[y], y, planta[x][y].pos, x);
+							planta[x][y].tiemp = -1;
+							planta[x][y].animacion = 2 * LIM_F_PLANT;
+							planta[x][y].estado = 0;
+						}
+					}
 					break;
 				case 2://GIRASOL
 					if (planta[x][y].estado == 1) {
@@ -424,12 +477,21 @@ void funcion_planta() {
 					}
 					else if (planta[x][y].estado == 0) {
 						//cambio de estado: soles
-						if (planta[x][y].tiemp >= rand() % 8) {
+						if (planta[x][y].tiemp >= 54 + rand() % 8) {
 							planta[x][y].animacion = -1;
 							planta[x][y].tiemp = 0;
 							planta[x][y].estado = 1;
 							std::cout << "SOL GENERANDO" << std::endl;
 						}
+					}
+					break;
+				case 3://PETACEREZA
+					if (planta[x][y].estado == 0 && planta[x][y].animacion >= 3 * LIM_F_PLANT * 2 - 1) {
+						planta[x][y].animacion = 0;
+						planta[x][y].estado = 1;
+					}
+					else if (planta[x][y].estado == 1 && planta[x][y].tiemp >= LIM_F_EXPLO * 1.5) {
+						planta[x][y].pv = 0;
 					}
 					break;
 				case 5://PAPAPUM
@@ -438,6 +500,42 @@ void funcion_planta() {
 						planta[x][y].tiemp = 0;
 						planta[x][y].estado = 1;
 						std::cout << "PAPAPUM ARMADA" << std::endl;
+					}
+					break;
+				case 6://Hielaguisantes
+					if (planta[x][y].estado == 0 && cant_zombi[y] > 0 && planta[x][y].tiemp >= 5 + rand() % 2) {
+						planta[x][y].tiemp = -1;
+						planta[x][y].estado = 1;
+						planta[x][y].animacion = 0;
+					}
+					if (planta[x][y].estado == 1) {
+						if (planta[x][y].tiemp >= 1) {
+							generar_proyectil(proyectil[y], y, planta[x][y].pos, x);
+							planta[x][y].tiemp = -1;
+							planta[x][y].animacion = 2 * LIM_F_PLANT;
+							planta[x][y].estado = 0;
+						}
+					}
+					break;
+				case 8://Repetidora
+					if (planta[x][y].estado == 0 && cant_zombi[y] > 0 && planta[x][y].tiemp >= 5 + rand() % 2) {
+						planta[x][y].tiemp = -1;
+						planta[x][y].estado = 1;
+						planta[x][y].tiemp_evento = 0;
+						planta[x][y].animacion = 0;
+					}
+					if (planta[x][y].estado == 1) {
+						if (planta[x][y].tiemp >= 1) {
+							generar_proyectil(proyectil[y], y, planta[x][y].pos, x);
+							planta[x][y].tiemp = 0;
+							planta[x][y].animacion = 2 * LIM_F_PLANT - LIM_F_PLANT / 2;
+							planta[x][y].tiemp_evento++;
+						}
+						if (planta[x][y].tiemp_evento >= 2) {
+							planta[x][y].animacion = 2 * LIM_F_PLANT;
+							planta[x][y].tiemp = -1;
+							planta[x][y].estado = 0;
+						}
 					}
 					break;
 				default:
@@ -527,10 +625,10 @@ void seleccionar_planta(ALLEGRO_EVENT pos, short pos_semillero) {
 short animacion_planta(short x, short y) {
 	switch (planta[x][y].pos) {
 	case 1://LANZAGUISANTES
-		if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
-		else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
 		switch (planta[x][y].estado) {
 		case 0://NORMAL
+			if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
 			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
 			case 0: case 4:
 				return 0;
@@ -542,6 +640,15 @@ short animacion_planta(short x, short y) {
 				return 270;
 			case 6:
 				return 360;
+			}
+			break;
+		case 1:
+			if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: return 0;
+			case 1: return 450;
+			case 2: return 540;
+			default: return 630;
 			}
 			break;
 		}
@@ -570,18 +677,29 @@ short animacion_planta(short x, short y) {
 			return planta[x][y].animacion * 90 + 450;
 		}
 		break;
+	case 3://PETACEREZA
+		switch (planta[x][y].estado) {
+		case 0:
+			if (planta[x][y].animacion < 3 * (LIM_F_PLANT * 2) - 1) planta[x][y].animacion++;
+			return (int(planta[x][y].animacion / (LIM_F_PLANT * 2)) * 90);
+			break;
+		case 1:
+			if (planta[x][y].animacion < 12 * LIM_F_EXPLO) planta[x][y].animacion++;
+			return 360;
+		}
+		break;
 	case 4://NUEZ
 		if (planta[x][y].pv > 53) {
-			return 0;
+			return 0 + (planta[x][y].tiemp % 8 ? 0 : 1) * 360;
 		}
 		else if (planta[x][y].pv > 31 && planta[x][y].pv <= 53) {
-			return 90;
+			return 90 + (planta[x][y].tiemp % 7 ? 0 : 1) * 360;
 		}
 		else if (planta[x][y].pv > 10 && planta[x][y].pv <= 31) {
-			return 180;
+			return 180 + (planta[x][y].tiemp % 6 ? 0 : 1) * 360;
 		}
 		else {
-			return 270;
+			return 270 + (planta[x][y].tiemp % 3 ? 0 : 1) * 360;
 		}
 		break;
 	case 5://PAPAPUM
@@ -591,7 +709,7 @@ short animacion_planta(short x, short y) {
 			return ((planta[x][y].tiemp >= 65 ? planta[x][y].tiemp : 0) % 2) * 90 + 180;
 		case 1:
 			//ACTIVA
-			if (planta[x][y].animacion < 40) planta[x][y].animacion++;
+			planta[x][y].animacion++;
 			switch (int(planta[x][y].animacion / 8)) {
 			case 0:
 				return 360 + (planta[x][y].tiemp % 2 * 270);
@@ -605,10 +723,39 @@ short animacion_planta(short x, short y) {
 		}
 		break;
 	case 6://HIELAGUISANTES
-		if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
-		else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
 		switch (planta[x][y].estado) {
 		case 0://NORMAL
+			if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: case 4:
+				return 0;
+			case 1: case 3:
+				return 90;
+			case 2:
+				return 180;
+			case 5: case 7:
+				return 270;
+			case 6:
+				return 360;
+			}
+			break;
+		case 1:
+			if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: return 0;
+			case 1: return 450;
+			case 2: return 540;
+			default: return 630;
+			}
+			break;
+		}
+		break;
+	case 7://CARROÑIVORA
+		switch (planta[x][y].estado) {
+		case 0://NORMAL
+			if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
 			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
 			case 0: case 4:
 				return 0;
@@ -625,10 +772,10 @@ short animacion_planta(short x, short y) {
 		}
 		break;
 	case 8://REPETIDORA
-		if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
-		else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
 		switch (planta[x][y].estado) {
 		case 0://NORMAL
+			if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
 			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
 			case 0: case 4:
 				return 0;
@@ -640,6 +787,15 @@ short animacion_planta(short x, short y) {
 				return 270;
 			case 6:
 				return 360;
+			}
+			break;
+		case 1:
+			if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: return 0;
+			case 1: return 450;
+			case 2: return 540;
+			default: return 630;
 			}
 			break;
 		}
@@ -782,10 +938,56 @@ void generar_sol_recolect(short pos_x, short pos_y, short cant) {
 
 /*----------FUNCIONES-PROYECTIL-------------------------------------------------------------------------------------------*/
 
-void generar_proyectil(short pos_x, Proyectil& proyectil) {
-	proyectil.x += pos_x + 5;
-	std::cout << "Proyectil generado en [" << pos_x << "]" << std::endl;
+void generar_proyectil(Proyectil *proyectil, int y, short tipo, short pos_x) {
+	Proyectil* nuevo_proy = NULL, * anterior_proy = NULL, * ptr_proy = NULL;
+	nuevo_proy = anterior_proy = proyectil;
+	for (int i{}; i < cant_proy[y]; i++) {
+		ptr_proy = nuevo_proy->sig_proy;
+		nuevo_proy = ptr_proy;
+	}
+	//Generar nuevo espacio en memoria
+	nuevo_proy->sig_proy = new Proyectil;
+	//asignar nuevo espacio en memoria
+	anterior_proy = nuevo_proy;
+	nuevo_proy= nuevo_proy->sig_proy;
+
+	//Asignar punteros
+	nuevo_proy->ant_proy = anterior_proy;
+	nuevo_proy->sig_proy = NULL;
+
+	nuevo_proy->x = pos_x * 100 + 280;
+	switch (tipo) {
+	default:
+		nuevo_proy->tipo = 0;
+		break;
+	case 6:
+		nuevo_proy->tipo = 1;
+		break;
+	}
+	nuevo_proy->tiempo_ev = 0;
+	cant_proy[y]++;
 }
+
+
+bool mover_proyectil(Proyectil& proy, short pos_y) {
+	if (proy.x > RESOL_X) {
+		Eliminar_Proyectil:
+		if (proy.sig_proy) {
+			proy.ant_proy->sig_proy = proy.sig_proy;
+			proy.sig_proy->ant_proy = proy.ant_proy;
+		}
+		else {
+			proy.ant_proy->sig_proy = NULL;
+		}
+		cant_proy[pos_y]--;
+		std::cout << "POSICION ELIMINADA: " << &proy << std::endl;
+		delete& proy;
+		return 1;
+	}
+	proy.x += 5;
+	return 0;
+}
+
 
 /*----------FUNCIONES-EXTRA-----------------------------------------------------------------------------------------------*/
 
@@ -819,18 +1021,6 @@ void dibujar_numero(short num, float x, float y, ALLEGRO_COLOR color) {
 		}
 	}
 	al_destroy_bitmap(numeros);
-}
-
-void mover_proyectil() {
-	for (int y{}; y < CAS_Y; y++) {
-		for (int i{}; i < cant_proy[i]; i++) {
-			(proyectil[y] + i)->x += 1;
-			if ((proyectil[y] + i)->x > 1280) {
-				cant_proy[i]--;
-				proyectil[y] = (Proyectil*)realloc((void*)proyectil[y], (cant_proy[i] + 1) * sizeof(Proyectil));
-			}
-		}
-	}
 }
 
 void funcion_semillero() {

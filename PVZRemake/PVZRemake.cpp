@@ -19,7 +19,7 @@
 #define LIM_F_ZOMB_COM 12
 #define LIM_F_EXPLO 4
 
-#define FRAMES_INI 1800
+#define FRAMES_INI 1700
 
 #define CANT_PLANT 8
 #define RESOL_X 1280
@@ -110,14 +110,13 @@ struct Planta {
 	}esp;
 }		static  planta[CAS_X][CAS_Y];
 
-struct Oleada {
-	short posibilidadZomb;
-	short zombieAtak;
-	short difZomb, randomZombie, tiempNoZomb;
-	short cantZomb;
+struct Ronda {
+	short zombie_ataq;
+	short tiemp_no_zomb;
+	int puntos_sum;
 	long long puntos;
-	short dificultad, limiteDificultad, tiempoOleada, ritmoNivel, limiteTiempoOleada;
-}static	oleada;
+	short dificultad, lim_dificultad, tiempo_oleada, ritmo_nivel, lim_tiempo_oleada;
+}		static	oleada;
 
 struct Imagenes {
 	//Imágenes generales
@@ -197,7 +196,7 @@ float animacion_cabeza_part(Particula&);
 void oleadas_zombie();
 
 //DIBUJADO
-void dibujar_numero(short, float, float, ALLEGRO_COLOR, Imagenes);
+void dibujar_numero(long long, float, float, ALLEGRO_COLOR, Imagenes);
 void dibujar_texto(char*, short, short, ALLEGRO_COLOR, Imagenes);
 void dibujar_titulo(Imagenes, Cursor);
 void dibujar_selector(Imagenes, Cursor);
@@ -226,6 +225,8 @@ int main() {
 	bool cursor_org{ true };
 	int pantalla_org;
 	mouse.estado = 0;
+	mouse.x = RESOL_X / 2;
+	mouse.y = RESOL_Y / 2;
 	std::cout << "INICIO DE PROGRAMA" << std::endl;
 
 	if (!al_init()) return -1;
@@ -1154,6 +1155,7 @@ bool funcion_sol(Cursor mouse, Sol& sol, short pos) {
 			soles_guard += sol.cant;
 			soles_guard_suma += sol.cant;
 			oleada.puntos += 10;
+			oleada.puntos_sum += 10;
 			sol.x = x;
 			sol.y = y;
 			sol.estado.recol.mov_x = x - 40;
@@ -1449,6 +1451,7 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 					zomb.est_danio = -4;
 					zomb.animacion = 0;
 					zomb.tiemp = 0;
+					zomb.comiendo = false;
 				}
 			}
 
@@ -1582,9 +1585,9 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 		if (zomb.tiemp > 38) {
 		eliminar_zombie:
 			switch (zomb.id) {
-			case 0:	oleada.puntos += 100;	break;
-			case 1:	oleada.puntos += 200;	break;
-			case 2:	oleada.puntos += 500;	break;
+			case 0:	oleada.puntos += 100;	oleada.puntos_sum += 100;	break;
+			case 1:	oleada.puntos += 200;	oleada.puntos_sum += 200;	break;
+			case 2:	oleada.puntos += 500;	oleada.puntos_sum += 500;	break;
 			}
 			if (zomb.sig_zomb) {
 				zomb.ant_zomb->sig_zomb = zomb.sig_zomb;
@@ -1678,47 +1681,55 @@ void generar_zombie(short y ,short tipo) {
 }
 
 void oleadas_zombie() {
-	oleada.cantZomb = 0;
+	short zombie_dif{ 0 }, random_zomb{ 0 }, total_zomb{ 0 };
 	for (int i{}; i < CAS_Y; i++) {
-		oleada.cantZomb += cant_zombi[i];
+		total_zomb += cant_zombi[i];
 	}
-	if (oleada.cantZomb == 0 && frames > FRAMES_INI) {
-		oleada.tiempNoZomb++;
-		std::cout << "TNZ: " << oleada.tiempNoZomb << std::endl;
-		if (oleada.tiempNoZomb >= 240) {
+	if (total_zomb <= 0 && frames > FRAMES_INI) {
+		oleada.tiemp_no_zomb++;
+		std::cout << "TNZ: " << oleada.tiemp_no_zomb << std::endl;
+		if (oleada.tiemp_no_zomb >= 240) {
 			oleada.puntos += 1000;
-			oleada.tiempNoZomb = 0;
+			oleada.tiemp_no_zomb = 0;
 			goto generar_nueva_oleada;
 		}
 	}
-	else if (oleada.cantZomb > 0 && oleada.tiempNoZomb > 0) {
-		oleada.tiempNoZomb = 0;
+	else if (total_zomb > 0 && oleada.tiemp_no_zomb > 0) {
+		oleada.tiemp_no_zomb = 0;
 	}
-	if ((frames - FRAMES_INI) % oleada.tiempoOleada == 0 && frames > FRAMES_INI-1) {
+	if ((frames - FRAMES_INI) % oleada.tiempo_oleada == 0 && frames > FRAMES_INI-1) {
 		generar_nueva_oleada:
-		oleada.zombieAtak += oleada.dificultad;//Bajar el tiempo para la siguiente oleada
-		if (oleada.tiempoOleada > oleada.limiteTiempoOleada && frames > FRAMES_INI) {
-			oleada.tiempoOleada -= (oleada.tiempoOleada * .06) + (oleada.puntos + frames) * .00001 - 1;//MODIFICADO 0.8 org
+		oleada.zombie_ataq += oleada.dificultad;//Bajar el tiempo para la siguiente oleada
+		if (oleada.tiempo_oleada > oleada.lim_tiempo_oleada && frames > FRAMES_INI) {
+			oleada.tiempo_oleada -= (oleada.tiempo_oleada * .08) + (oleada.puntos + frames) * .0000001 - 1;//MODIFICADO 0.8 org
 		}//Si es menor a limiteTiempoOleada, se hace limiteTiempoOleada
-		if (oleada.tiempoOleada < oleada.limiteTiempoOleada) {
-			oleada.tiempoOleada = oleada.limiteTiempoOleada;
+		if (oleada.tiempo_oleada < oleada.lim_tiempo_oleada) {
+			oleada.tiempo_oleada = oleada.lim_tiempo_oleada;
 		}
-		std::cout << "Inicio nueva Oleada " << oleada.cantZomb << std::endl;
+		std::cout << "DIFICULTAD: " << oleada.dificultad << std::endl;
 	}
-	if (frames % 60 == 0) {
+
+	//GENERAR ZOMBIES EN EL TABLERO
+	if (frames % 10 == 0 && !(rand() % 4)) {
 		bool zomb_aparecido[CAS_Y], lleno{ false };
 		for (int i{}; i < CAS_Y; i++) {
-			zomb_aparecido[i] = false;
+			if (cant_zombi[i] > total_zomb / 5) {
+				zomb_aparecido[i] = true;
+			}
+			else {
+				zomb_aparecido[i] = false;
+			}
 		}
-		while (oleada.zombieAtak > 0 && !lleno) {
+		while (oleada.zombie_ataq > 0 && !lleno) {
 			short fila_aparicion;
-			oleada.randomZombie = rand() % oleada.zombieAtak + 1;
+			random_zomb = rand() % oleada.zombie_ataq + 1;
 			for (int i{}, cant_aparicion{}; i < CAS_Y; i++) {
 				if (zomb_aparecido[i]) {
 					cant_aparicion++;
 				}
-				if (cant_aparicion == CAS_Y) {
+				if (cant_aparicion >= CAS_Y) {
 					lleno = true;
+					break;
 				}
 			}
 			if (lleno) {
@@ -1727,29 +1738,33 @@ void oleadas_zombie() {
 			do {
 				fila_aparicion = rand() % CAS_Y;
 			} while (zomb_aparecido[fila_aparicion]);
-			if (oleada.randomZombie <= 1) {
-				oleada.difZomb = 0;
-				oleada.zombieAtak -= 1;
+			if (random_zomb <= 2) {
+				zombie_dif = 0;
+				oleada.zombie_ataq -= 1;
 			}
-			else if (oleada.zombieAtak > 1 && oleada.zombieAtak <= 3) {
-				oleada.difZomb = 1;
-				oleada.zombieAtak -= 2;
+			else if (oleada.zombie_ataq > 2 && oleada.zombie_ataq <= 5) {
+				zombie_dif = 1;
+				oleada.zombie_ataq -= 3;
 			}
-			else if (oleada.zombieAtak > 3){
-				oleada.difZomb = 2;
-				oleada.zombieAtak -= 3;
+			else if (oleada.zombie_ataq > 5){
+				zombie_dif = 2;
+				oleada.zombie_ataq -= 6;
 			}
 			zomb_aparecido[fila_aparicion] = true;
-			generar_zombie(fila_aparicion, oleada.difZomb);
+			generar_zombie(fila_aparicion, zombie_dif);
+			if (!(rand() % (oleada.zombie_ataq + 1))) {
+				break;
+			}
 		}
 	}
-	if (frames > FRAMES_INI && (frames - FRAMES_INI) % oleada.ritmoNivel == 0 && oleada.dificultad < oleada.limiteDificultad) {
+	if (frames > FRAMES_INI && (frames - FRAMES_INI) % oleada.ritmo_nivel == 0 && oleada.dificultad < oleada.lim_dificultad) {
 		oleada.dificultad++;
-		if (oleada.ritmoNivel > FRAMES_INI/2) {
-			oleada.ritmoNivel *= 0.85;
+		std::cout << "DIFICULTAD: " << oleada.dificultad << std::endl;
+		if (oleada.ritmo_nivel > FRAMES_INI/2) {
+			oleada.ritmo_nivel *= 0.9;
 		}
-		if (oleada.ritmoNivel < FRAMES_INI/2) {
-			oleada.ritmoNivel = FRAMES_INI/2;
+		if (oleada.ritmo_nivel < FRAMES_INI/2) {
+			oleada.ritmo_nivel = FRAMES_INI/2;
 		}
 	}
 }
@@ -2090,16 +2105,17 @@ void inicializar_juego(Imagenes& b) {
 		zombie[i]->sig_zomb = NULL;
 		cant_zombi[i] = 0;
 	}
-	// inicializar Oleadas
-	oleada.zombieAtak = 0;
-	oleada.difZomb = 0;
-	oleada.randomZombie = 0;
-	oleada.tiempNoZomb = 0;
+
+	//inicializar Oleadas
+	oleada.zombie_ataq = 0;
+	oleada.tiemp_no_zomb = 0;
 	oleada.dificultad = 1;
-	oleada.limiteDificultad = 50;
-	oleada.tiempoOleada = FRAMES_INI;
-	oleada.ritmoNivel = FRAMES_INI * 3;
-	oleada.limiteTiempoOleada = 360;
+	oleada.lim_dificultad = 50;
+	oleada.tiempo_oleada = FRAMES_INI;
+	oleada.ritmo_nivel = FRAMES_INI * 3;
+	oleada.lim_tiempo_oleada = 400;
+	oleada.puntos_sum = 0;
+
 	//iniciar matriz plantas
 	for (int y{}; y < CAS_Y; y++) {
 		for (int x{}; x < CAS_X; x++) {
@@ -2236,8 +2252,9 @@ void finalizar_juego(Imagenes& b) {
 
 /*----------------------DIBUJADO------------------------------------------------------------------------------------------*/
 
-void dibujar_numero(short num, float x, float y, ALLEGRO_COLOR color, Imagenes b) {
-	short tam{}, copi_num{ num };
+void dibujar_numero(long long num, float x, float y, ALLEGRO_COLOR color, Imagenes b) {
+	short tam{};
+	long long copi_num{ num };
 	float pos_x;
 	if (copi_num == 0) {
 		tam++;
@@ -2865,7 +2882,10 @@ void dibujar_tablero(Imagenes b, Cursor mouse) {
 	}
 
 	dibujar_texto((char*)"Puntuaci'on", 5, RESOL_Y - 85, NORM_C, b);
-	dibujar_numero(oleada.puntos, 110, RESOL_Y - 50 , NORM_C, b);
+	dibujar_numero(oleada.puntos - oleada.puntos_sum, 110, RESOL_Y - 50 , NORM_C, b);
+	if (oleada.puntos_sum > 0) {
+		oleada.puntos_sum -= oleada.puntos_sum/20 + 1;
+	}
 
 	if (enseniar_cursor) {
 		dibujar_cursor(b, mouse);

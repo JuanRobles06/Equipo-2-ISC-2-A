@@ -47,10 +47,10 @@ static short cant_sol_tablero{ 0 }, cant_particulas{ 0 };
 static short cant_zombi[CAS_Y]{ 0,0,0,0,0 }, cant_zombi_ignorar[CAS_Y]{ 0,0,0,0,0 }, cant_proy[CAS_Y], anim_sobre_tablero{ 0 };
 static long cant_zombi_elim{ 0 }, cant_sol_recol{ 0 };
 
-static short pantalla{ 0 }, pos_semillero{ 0 };
+static short pantalla{ 0 }, pos_semillero{ 0 }, indice_nombre{ 0 };
 static short explosion_tablero[CAS_X + 1][CAS_Y];
 
-static bool fin_juego{ false }, pausa_total{ false }, pantalla_completa{ false };
+static bool fin_juego{ false }, pausa_total{ false }, pantalla_completa{ false }, nom_compl{ false };
 static short resol_x{ RESOL_X }, resol_y{ RESOL_Y };
 static float tam_pant_x{ 1 }, tam_pant_y{ 1 };
 
@@ -315,9 +315,6 @@ int main() {
 	if (!al_init_image_addon()) return -1;
 	if (!al_install_keyboard()) return -1;
 	if (!al_install_mouse()) return -1;
-
-	std::cout << "introducir nombre (TRES DIGITOS): ";
-	std::cin >> guardar.nombre;
 
 	al_set_new_display_refresh_rate(60);
 
@@ -734,11 +731,13 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 		case ALLEGRO_MOUSE_BUTTON_LEFT:
 			if (presionado) {
 				mouse.estado = 2;
-				if (mouse.y >= 160) {
-					plantar_planta();
-				}
-				else if (mouse.y <= 110) {
-					seleccionar_planta(0);
+				if (!pausa_total) {
+					if (mouse.y >= 160) {
+						plantar_planta();
+					}
+					else if (mouse.y <= 110) {
+						seleccionar_planta(0);
+					}
 				}
 			}
 			else {
@@ -751,26 +750,48 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 }
 
 void registrar_teclas(ALLEGRO_EVENT teclado) {
+	char letra;
 	switch (pantalla) {
 	case 2://Tablero
 		switch (teclado.keyboard.keycode) {
-		case ALLEGRO_KEY_P:
-			for (int y{}; y < CAS_Y; y++) {
-				for (int x{}; x < CAS_X; x++) {
-					planta[x][y].pos = 0;
-				}
-			}
-			break;
 		default://teclas extra
-			if (teclado.keyboard.keycode >= 28 && teclado.keyboard.keycode <= 36) {
+			if (teclado.keyboard.keycode >= 28 && teclado.keyboard.keycode <= 36 && !pausa_total) {
 				seleccionar_planta(teclado.keyboard.keycode - 27);
 			}
 			break;
-		case ALLEGRO_KEY_L: seleccionar_planta(-1); break;
-		case ALLEGRO_KEY_Z: generar_zombie(rand() % CAS_Y, rand() % 3); break;
-		case ALLEGRO_KEY_ENTER: pausa_total = pausa_total ? 0 : 1; break;
+		case ALLEGRO_KEY_L:
+			if (!pausa_total)
+				seleccionar_planta(-1);
+			break;
+		case ALLEGRO_KEY_ENTER:pausa_total = fin_juego ? 0 : !pausa_total; break;
 		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
 		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
+		}
+		break;
+	case 3:
+		switch (teclado.keyboard.keycode) {
+		default://teclas extra
+			if (tr.fin.tiemp > 420 && tr.id == 5) {
+				if (teclado.keyboard.keycode >= ALLEGRO_KEY_A && teclado.keyboard.keycode <= ALLEGRO_KEY_Z) {
+					letra = (char)teclado.keyboard.keycode + 64;
+					guardar.nombre[indice_nombre % 3] = letra;
+					indice_nombre++;
+					if (indice_nombre >= 3) {
+						nom_compl = true;
+					}
+					std::cout << letra << std::endl;
+				}
+			}
+			break;
+		case ALLEGRO_KEY_ENTER:
+			if (nom_compl) {
+				tr.id = 1;
+				tr.finalizado = false;
+				tr.arbustos.y = RESOL_Y;
+			}
+			break;
+		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
+		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
 		}
 		break;
 	default:
@@ -1479,8 +1500,8 @@ void generar_sol_recolect(short pos_x, short pos_y, short cant) {
 	else {
 		nuevo_sol->estado_act = -1;
 		nuevo_sol->x = pos_x;
-		nuevo_sol->y = 0;
-		nuevo_sol->estado.cayendo.mov_y = rand() % (RESOL_Y - 500) + 200;
+		nuevo_sol->y = -100;
+		nuevo_sol->estado.cayendo.mov_y = rand() % (RESOL_Y - 400) + 200;
 	}
 	cant_sol_tablero++;
 }
@@ -2322,6 +2343,7 @@ void finalizar_titulo() {
 }
 
 void inicializar_selector() {
+	pos_semillero = 0;
 	for (int i{}; i < LIM_SEM; i++) {
 		semillero[i].plant = -2;
 	}
@@ -2518,7 +2540,10 @@ void inicializar_fin_juego() {
 
 	cargar_record();
 
+	strcpy(guardar.nombre, "AAA");
 	frames = 1;
+	indice_nombre = 0;
+	nom_compl = false;
 
 	bucle = true;
 }
@@ -2999,6 +3024,7 @@ void dibujar_tablero() {
 
 		//Dibujar zombies
 		ptr_zomb = zombie[y];
+		//Recorrer al fin de la lista
 		while (ptr_zomb->sig_zomb != NULL) {
 			//Se recorre al final de la lista enlazada
 			ptr_zomb = ptr_zomb->sig_zomb;
@@ -3146,7 +3172,8 @@ void dibujar_tablero() {
 				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28, ptr_proy->tipo * -28, 28, 28, ptr_proy->x, y * 100 + 189, 1);
 			}
 			else {
-				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, y * 100 + 189 + rand() % 3, 0);
+				short movimiento = pausa_total ? 0 : rand() % 3;
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, y * 100 + 189 + movimiento, 0);
 			}
 		}
 
@@ -3358,7 +3385,12 @@ void dibujar_tablero() {
 	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 50, NORM_C);
 	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 65, NORM_C);
 
-	if (enseniar_cursor) {
+	if (pausa_total && !fin_juego) {
+		al_draw_tinted_scaled_rotated_bitmap((ALLEGRO_BITMAP*)b.enfoque_oscuro, al_map_rgba(34, 2, 45, 140), 640, 660, 640, 660, 10, 10, 0, 0);
+		dibujar_texto((char*)"PAUSA", RESOL_X / 2 - 75, RESOL_Y / 2 - 15, NORM_C);
+	}
+
+	if (enseniar_cursor && !fin_juego) {
 		dibujar_cursor();
 	}
 
@@ -3367,7 +3399,6 @@ void dibujar_tablero() {
 		short extra_y{ 0 }, text_extra_y{ 0 };
 		short transpar, temblor_x, temblor_y;
 		temblor_x = temblor_y = 0;
-		enseniar_cursor = false;
 
 		//Mover foco de la imagen
 		if (tr.muerte.tam > 1) {
@@ -3502,7 +3533,7 @@ void dibujar_fin_juego() {
 				tr.fin.cant_zombi_elim_anim -= float(cant_zombi_elim) / 60;
 			}
 			else {
-				tr.fin.cant_zombi_elim_anim  = 0;
+				tr.fin.cant_zombi_elim_anim = 0;
 			}
 		}
 		if (tr.fin.tiemp > 180) {
@@ -3526,14 +3557,17 @@ void dibujar_fin_juego() {
 				tr.fin.puntuacion_anim = 0;
 			}
 		}
-		if (tr.fin.tiemp > 800) {
-			tr.id = 1;
-			tr.finalizado = false;
-			tr.arbustos.y = RESOL_Y;
+		if (tr.fin.tiemp > 420) {
+			dibujar_texto((char*)"Nombre", pos_x, 530, NORM_C);
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 180, 90, 30, 30, pos_x + 630 + indice_nombre % 3 * 22, 545, 0);
+			dibujar_texto((char*)guardar.nombre, pos_x + 630, 530, NORM_C);
+			if (nom_compl) {
+				dibujar_texto((char*)"Pulse ENTER para salir", pos_x, 580, NORM_C);
+			}
 		}
 		tr.fin.tiemp++;
 	}
-	else if (tr.id != 4){
+	else if (tr.id != 4) {
 		color_aux = al_map_rgb(145, 98, 200);
 		dibujar_texto((char*)"zombis eliminados", pos_x, 380, color_aux);
 		dibujar_numero(cant_zombi_elim, pos_x + 670, 380, color_aux);
@@ -3544,6 +3578,12 @@ void dibujar_fin_juego() {
 
 		dibujar_texto((char*)"puntuaci'on", pos_x, 480, NORM_C);
 		dibujar_numero(oleada.puntos, pos_x + 670, 480, NORM_C);
+
+		dibujar_texto((char*)"Nombre", pos_x, 530, NORM_C);
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 180, 90, 30, 30, pos_x + 630 + indice_nombre % 3 * 22, 545, 0);
+		dibujar_texto((char*)guardar.nombre, pos_x + 630, 530, NORM_C);
+		dibujar_texto((char*)"Pulse ENTER para salir", pos_x, 580, NORM_C);
+
 	}
 
 	if (tr.id == 1) {
@@ -3594,6 +3634,9 @@ void dibujar_cursor() {
 		}
 
 		if (mouse.y < 110) {
+			if (mouse.estado != 2) {
+				mouse.estado = 0;
+			}
 			for (int i{ 0 }; i <= LIM_SEM; i++) {
 				if (mouse.x >= 150 + i * 110 && mouse.x < 260 + i * 110) {
 					if (i < LIM_SEM && semillero[i].recarga == 0 && semillero[i].plant >= 0) {
@@ -3608,7 +3651,7 @@ void dibujar_cursor() {
 			}
 		}
 		else {
-			if (mouse.estado == 1) {
+			if (mouse.estado != 2) {
 				mouse.estado = 0;
 			}
 		}
@@ -3621,27 +3664,42 @@ void dibujar_cursor() {
  /*----------------------ARCHIVOS-----------------------------------------------------------------------------------------*/
 
 void guardar_record(Record rec) {
-	FILE* records,* temp;
-	Record comp;
-	int cant{ 1 };
+	FILE* records, * temp;
+	Record comp, ant;
+	int cant{ 0 };
+	bool ingresado{ false };
 	records = fopen("marcadorPvZ.bin", "rb");
 	temp = fopen("temp.bin", "wb");
 	if (records) {
 		while (!feof(records) && cant < CANT_REC) {
 			fread(&comp, sizeof(Record), 1, records);
-			if (comp.puntos < rec.puntos) {
+			if (comp.puntos < rec.puntos && !ingresado) {
+				std::cout << "GUARDADO RECORD" << std::endl;
 				fwrite(&rec, sizeof(Record), 1, temp);
+				std::cout << rec.nombre << "\t" << rec.puntos << std::endl;
 				cant++;
+				ingresado = true;
 				if (cant < CANT_REC) {
 					fwrite(&comp, sizeof(Record), 1, temp);
+					std::cout << comp.nombre << "\t" << comp.puntos << std::endl;
 					cant++;
 				}
-				rec.puntos = -1;
 			}
 			else {
-				fwrite(&comp, sizeof(Record), 1, temp);
-				cant++;
+				if (cant > 0) {
+					if (ant.puntos != comp.puntos || strcmp(comp.nombre, ant.nombre) != 0) {
+						fwrite(&comp, sizeof(Record), 1, temp);
+						std::cout << comp.nombre << "\t" << comp.puntos << std::endl;
+						cant++;
+					}
+				}
+				else {
+					fwrite(&comp, sizeof(Record), 1, temp);
+					std::cout << comp.nombre << "\t" << comp.puntos << std::endl;
+					cant++;
+				}
 			}
+			ant = comp;
 		}
 		fclose(records);
 		remove("marcadorPvZ.bin");
@@ -3658,7 +3716,7 @@ void cargar_record() {
 	FILE* records;
 	Record aux;
 	int i{ 0 };
-	tabla = new Record[CANT_REC];
+	tabla = new Record[CANT_REC + 1];
 	records = fopen("marcadorPvZ.bin", "rb");
 	if (records) {
 		while (!feof(records)) {

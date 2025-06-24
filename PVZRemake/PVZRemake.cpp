@@ -39,7 +39,7 @@ const short REC_PLANTA[CANT_PLANT + 1]	{ 0,  60, 90, 600, 300, 300, 100,  90, 10
 /*----------VARIABLES_GLOBALES--------------------------------------------------------------------------------------------*/
 
 static short planta_elegida{ 0 }, semillero_elegido{ 0 };
-static unsigned long frames{ 0 };
+static unsigned long long frames{ 0 }, frames_indep{ 0 };
 static bool bucle{ true }, programa_corriendo{ true };
 
 static short cont, soles_guard{ 50 }, soles_guard_suma{ 0 }, plantas_en_semillero[LIM_SEM];
@@ -50,7 +50,7 @@ static long cant_zombi_elim{ 0 }, cant_sol_recol{ 0 };
 static short pantalla{ 0 }, pos_semillero{ 0 }, indice_nombre{ 0 };
 static short explosion_tablero[CAS_X + 1][CAS_Y];
 
-static bool fin_juego{ false }, pausa_total{ false }, pantalla_completa{ false }, nom_compl{ false };
+static bool fin_juego{ false }, pausa_total{ false }, pantalla_completa{ false }, nom_compl{ false }, foto{ false };
 static short resol_x{ RESOL_X }, resol_y{ RESOL_Y };
 static float tam_pant_x{ 1 }, tam_pant_y{ 1 };
 
@@ -283,6 +283,7 @@ void funcion_semillero();
 void cambiar_pantalla_completa();
 void guardar_record(Record);
 void cargar_record();
+void guardar_captura();
 
 //INICIAR/ TERMINAR JUEGO
 void inicializar_titulo();
@@ -356,6 +357,12 @@ int main() {
 				if (eventos.type == ALLEGRO_EVENT_MOUSE_AXES) {
 					mouse.x = eventos.mouse.x;
 					mouse.y = eventos.mouse.y;
+					if (mouse.x > RESOL_X) {
+						mouse.x = RESOL_X;
+					}
+					if (mouse.y > RESOL_Y) {
+						mouse.y = RESOL_Y;
+					}
 				}
 				switch (eventos.type) {
 					//Dibuja
@@ -401,6 +408,12 @@ int main() {
 				if (eventos.type == ALLEGRO_EVENT_MOUSE_AXES) {
 					mouse.x = eventos.mouse.x;
 					mouse.y = eventos.mouse.y;
+					if (mouse.x > RESOL_X) {
+						mouse.x = RESOL_X;
+					}
+					if (mouse.y > RESOL_Y) {
+						mouse.y = RESOL_Y;
+					}
 				}
 				switch (eventos.type) {
 					//Dibuja
@@ -443,6 +456,12 @@ int main() {
 				if (eventos.type == ALLEGRO_EVENT_MOUSE_AXES) {
 					mouse.x = eventos.mouse.x;
 					mouse.y = eventos.mouse.y;
+					if (mouse.x > RESOL_X) {
+						mouse.x = RESOL_X;
+					}
+					if (mouse.y > RESOL_Y) {
+						mouse.y = RESOL_Y;
+					}
 				}
 				switch (eventos.type) {
 					//El juego avanza
@@ -510,6 +529,7 @@ int main() {
 					if (!pausa_total) {
 						frames++;
 					}
+					frames_indep++;
 					break;
 
 					//Registrar teclas
@@ -550,6 +570,12 @@ int main() {
 				if (eventos.type == ALLEGRO_EVENT_MOUSE_AXES) {
 					mouse.x = eventos.mouse.x;
 					mouse.y = eventos.mouse.y;
+					if (mouse.x > RESOL_X) {
+						mouse.x = RESOL_X;
+					}
+					if (mouse.y > RESOL_Y) {
+						mouse.y = RESOL_Y;
+					}
 				}
 				switch (eventos.type) {
 					//Dibuja
@@ -615,7 +641,7 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 					tr.mano.tiemp = 0;
 					tr.mano.y = RESOL_Y;
 					tr.mano.arbust_y = RESOL_Y;
-					if (tr.y_global != 0) {
+					if (tr.y_global > 0) {
 						tr.y_global = -565;
 					}
 				}
@@ -766,6 +792,7 @@ void registrar_teclas(ALLEGRO_EVENT teclado) {
 		case ALLEGRO_KEY_ENTER:pausa_total = fin_juego ? 0 : !pausa_total; break;
 		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
 		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
+		case ALLEGRO_KEY_F5:	foto = true; break;
 		}
 		break;
 	case 3:
@@ -792,13 +819,14 @@ void registrar_teclas(ALLEGRO_EVENT teclado) {
 			break;
 		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
 		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
+		case ALLEGRO_KEY_F5:	foto = true; break;
 		}
 		break;
 	default:
 		switch (teclado.keyboard.keycode) {
 		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
 		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
-			//AL_SAVE_BITMAP Tomar screenshots
+		case ALLEGRO_KEY_F5:	foto = true; break;
 		}
 		break;
 	}
@@ -1970,7 +1998,7 @@ void oleadas_zombie() {
 	if (frames % 10 == 0 && !(rand() % 4)) {
 		bool zomb_aparecido[CAS_Y], lleno{ false };
 		for (int i{}; i < CAS_Y; i++) {
-			if (cant_zombi[i] > total_zomb / 5) {
+			if (cant_zombi[i] > total_zomb / CAS_Y) {
 				zomb_aparecido[i] = true;
 			}
 			else {
@@ -2108,38 +2136,40 @@ bool funcion_particula(Particula& part) {
 	if (part.tiemp > 1800) {
 		eliminar = true;
 	}
-	//Determinar tipo de animación a realizar
-	switch (part.estado) {
-		//Case 0: Vuela la cabeza
-	case 1://Transición a movimiento
-		part.y = animacion_cabeza_part(part);
-		part.estado = 2;
-		part.tiemp = 0;
-		break;
-		//Case 2: Rueda hacia la derecha
-	case 3://Termina el movimiento
-		if (part.tiemp >= 600) {
-			part.estado = 4;
+	if (!pausa_total) {
+		//Determinar tipo de animación a realizar
+		switch (part.estado) {
+			//Case 0: Vuela la cabeza
+		case 1://Transición a movimiento
+			part.y = animacion_cabeza_part(part);
+			part.estado = 2;
 			part.tiemp = 0;
+			break;
+			//Case 2: Rueda hacia la derecha
+		case 3://Termina el movimiento
+			if (part.tiemp >= 600) {
+				part.estado = 4;
+				part.tiemp = 0;
+			}
+			break;
+		case 4://Se desvanece
+			if (part.tiemp > 250) {
+				eliminar = true;
+			}
 		}
-		break;
-	case 4://Se desvanece
-		if (part.tiemp > 250) {
-			eliminar = true;
+		part.tiemp++;
+		if (eliminar) {
+			if (part.sig_part) {
+				part.ant_part->sig_part = part.sig_part;
+				part.sig_part->ant_part = part.ant_part;
+			}
+			else {
+				part.ant_part->sig_part = NULL;
+			}
+			cant_particulas--;
+			delete& part;
+			return true;
 		}
-	}
-	part.tiemp++;
-	if (eliminar) {
-		if (part.sig_part) {
-			part.ant_part->sig_part = part.sig_part;
-			part.sig_part->ant_part = part.ant_part;
-		}
-		else {
-			part.ant_part->sig_part = NULL;
-		}
-		cant_particulas--;
-		delete& part;
-		return true;
 	}
 	return false;
 }
@@ -2373,12 +2403,14 @@ void inicializar_juego() {
 	sol_tablero->ant_sol = NULL;
 	sol_tablero->sig_sol = NULL;
 	sol_tablero->estado_act = 4;
+	cant_sol_tablero = 0;
 
 	//Inicializar partículas
 	particulas = new Particula;
 	particulas->ant_part = NULL;
 	particulas->sig_part = NULL;
 	particulas->id = -1;
+	cant_particulas = 0;
 
 	//Inicializar Proyectiles
 	for (int i{}; i < CAS_Y; i++) {
@@ -2425,8 +2457,12 @@ void inicializar_juego() {
 	}
 
 	frames = 1;
+	frames_indep = 0;
 	cant_zombi_elim = 0;
 	cant_sol_recol = 0;
+	soles_guard = 50;
+	planta_elegida = 0;
+	anim_sobre_tablero = 0;
 
 	b.plantas_dia = al_load_bitmap("Sprites/Plants/Plants_Daytime.png");
 	b.chomper_anim = al_load_bitmap("Sprites/Plants/Chomper_Bite.png");
@@ -2441,6 +2477,7 @@ void inicializar_juego() {
 	b.fondo_casa_dia = al_load_bitmap("Sprites/Daylight_Playground.png");
 	b.enfoque_oscuro = al_load_bitmap("Sprites/Focus_Screen.png");
 	b.texto_inicio_part = al_load_bitmap("Sprites/Extra/Start_Text_Bitmap.png");
+	b.fondo_plantas = al_load_bitmap("Sprites/Plants_Background.png");
 
 	bucle = true;
 }
@@ -2529,6 +2566,7 @@ void finalizar_juego() {
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.zombie_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.enfoque_oscuro);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.texto_inicio_part);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_plantas);
 }
 
 void inicializar_fin_juego() {
@@ -2768,7 +2806,6 @@ void dibujar_titulo() {
 			tr.id = -1;
 		}
 	}
-
 	dibujar_cursor();
 
 	//Dibujar reesclado
@@ -3386,14 +3423,16 @@ void dibujar_tablero() {
 	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 65, NORM_C);
 
 	if (pausa_total && !fin_juego) {
-		al_draw_tinted_scaled_rotated_bitmap((ALLEGRO_BITMAP*)b.enfoque_oscuro, al_map_rgba(34, 2, 45, 140), 640, 660, 640, 660, 10, 10, 0, 0);
+		short trasl_x = frames_indep % RESOL_X;
+		short trasl_y = frames_indep % RESOL_Y;
+		al_draw_tinted_bitmap((ALLEGRO_BITMAP*)b.fondo_plantas, TRANS_C, -RESOL_X + trasl_x, 0 - trasl_y, 0);
 		dibujar_texto((char*)"PAUSA", RESOL_X / 2 - 75, RESOL_Y / 2 - 15, NORM_C);
 	}
 
 	if (enseniar_cursor && !fin_juego) {
 		dibujar_cursor();
 	}
-
+	
 	//Animación muerte
 	if (tr.id == 4) {
 		short extra_y{ 0 }, text_extra_y{ 0 };
@@ -3580,7 +3619,7 @@ void dibujar_fin_juego() {
 		dibujar_numero(oleada.puntos, pos_x + 670, 480, NORM_C);
 
 		dibujar_texto((char*)"Nombre", pos_x, 530, NORM_C);
-		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 180, 90, 30, 30, pos_x + 630 + indice_nombre % 3 * 22, 545, 0);
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 240, 90, 30, 30, pos_x + 630 + indice_nombre % 3 * 22, 550, 0);
 		dibujar_texto((char*)guardar.nombre, pos_x + 630, 530, NORM_C);
 		dibujar_texto((char*)"Pulse ENTER para salir", pos_x, 580, NORM_C);
 
@@ -3607,6 +3646,11 @@ void dibujar_fin_juego() {
 }
 
 void dibujar_cursor() {
+	if (foto) {
+		guardar_captura();
+		foto = false;
+		return;
+	}
 	switch (pantalla) {
 	case 1://Selector
 		if (mouse.x >= 45 && mouse.x < 265 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
@@ -3673,6 +3717,7 @@ void guardar_record(Record rec) {
 	if (records) {
 		while (!feof(records) && cant < CANT_REC) {
 			fread(&comp, sizeof(Record), 1, records);
+			//Si el nuevo récord es superior, se introduce
 			if (comp.puntos < rec.puntos && !ingresado) {
 				std::cout << "GUARDADO RECORD" << std::endl;
 				fwrite(&rec, sizeof(Record), 1, temp);
@@ -3687,6 +3732,7 @@ void guardar_record(Record rec) {
 			}
 			else {
 				if (cant > 0) {
+					//Si se repite un récord, este se elimina
 					if (ant.puntos != comp.puntos || strcmp(comp.nombre, ant.nombre) != 0) {
 						fwrite(&comp, sizeof(Record), 1, temp);
 						std::cout << comp.nombre << "\t" << comp.puntos << std::endl;
@@ -3694,6 +3740,7 @@ void guardar_record(Record rec) {
 					}
 				}
 				else {
+					//Copia
 					fwrite(&comp, sizeof(Record), 1, temp);
 					std::cout << comp.nombre << "\t" << comp.puntos << std::endl;
 					cant++;
@@ -3726,4 +3773,24 @@ void cargar_record() {
 		}
 		fclose(records);
 	}
+}
+
+void guardar_captura() {
+	char nombre[50];
+	bool primera_iter{ true };
+	int id{ 0 };
+	FILE* aux{ NULL };
+	for (id;  aux || primera_iter; id++) {
+		if (aux) {
+			fclose(aux);
+		}
+		sprintf(nombre, "Screenshots/Captura_%d.png", id);
+		primera_iter = false;
+		aux = fopen(nombre, "rb");
+	}
+	al_save_bitmap(nombre, (ALLEGRO_BITMAP*)b.al.buffer);
+	if (aux) {
+		fclose(aux);
+	}
+	foto = false;
 }

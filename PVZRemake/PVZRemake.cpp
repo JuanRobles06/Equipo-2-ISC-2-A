@@ -21,20 +21,22 @@
 
 #define FRAMES_INI 1800
 
-#define CANT_PLANT 8
+#define CANT_PLANT 16
 #define RESOL_X 1280
 #define RESOL_Y 720
 
 #define CANT_REC 5
 
 #define NORM_C al_map_rgb(255, 255, 255)
+#define M_NORM_C(c) al_map_rgb(c, c, c)
 #define TRANS_C al_map_rgba(204, 204, 204, 204)
+#define M_TRANS_C(t) al_map_rgba(t, t, t, t)
 
 /*----------CONSTANTES-PLANTAS--------------------------------------------------------------------------------------------*/
 
-const short COST_PLANTA[CANT_PLANT + 1]	{ 0, 100, 50, 150,  50,  25, 175, 150, 200 };
-const short PV_PLANTA[CANT_PLANT + 1]	{ 0,  20, 20,  20, 350,  15,  20,  20,  20 };
-const short REC_PLANTA[CANT_PLANT + 1]	{ 0,  60, 90, 600, 300, 300, 100,  90, 100 };
+const short COST_PLANTA[CANT_PLANT + 1]	{ 0, 100, 50, 150,  50,  25, 175, 150, 200,   0,  25,  75,  125,  75,  25,  75, 125};
+const short PV_PLANTA[CANT_PLANT + 1]	{ 0,  20, 20,  20, 350,  15,  20,  20,  20,  10,  20,  20,  275,   1,  20,  20,  20};
+const short REC_PLANTA[CANT_PLANT + 1]	{ 0,  60, 90, 600, 300, 300, 100,  90, 100,  80,  90, 100,  400, 300,  80, 600,1200};
 
 /*----------VARIABLES_GLOBALES--------------------------------------------------------------------------------------------*/
 
@@ -145,9 +147,9 @@ struct Imagenes {
 
 	//Imágenes juego normal
 	void* plantas_dia;
+	void* plantas_noche;
 	void* chomper_anim;
 	void* semillero_bitmap;
-	void* semillero_recarga;
 	void* pala_cursor;
 	void* pala_interfaz;
 	void* sol_bitmap;
@@ -317,8 +319,6 @@ int main() {
 	if (!al_install_keyboard()) return -1;
 	if (!al_install_mouse()) return -1;
 
-	al_set_new_display_refresh_rate(60);
-
 	b.al.display = al_create_display(RESOL_X, RESOL_Y);
 	al_set_window_title((ALLEGRO_DISPLAY*)b.al.display, "Plantas Contra Zombies Remake");
 	al_set_display_icon((ALLEGRO_DISPLAY*)b.al.display, al_load_bitmap("Sprites/Icon.png"));
@@ -332,6 +332,8 @@ int main() {
 	b.cursor_bitmap = al_load_bitmap("Sprites/Extra/Cursor_Bitmap.png");
 	b.fuente_bitmap = al_load_bitmap("Sprites/Extra/Font_Bitmap.png");
 	b.arbustos_transicion = al_load_bitmap("Sprites/Transition_Bushes.png");
+
+	al_set_new_bitmap_flags(ALLEGRO_MIN_LINEAR | ALLEGRO_MAG_LINEAR);
 	b.al.buffer = al_create_bitmap(RESOL_X, RESOL_Y);
 	
 	tr.id = -1;
@@ -684,7 +686,7 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 				//buscar ratón en el semillero
 				if (mouse.y >= 190 && mouse.y < 300) {
 					//revisa en la primera fila de plantas
-					for (int i{}; i < CANT_PLANT; i++) {
+					for (int i{}; i < 8; i++) {
 						if (mouse.x >= i * 110 + 45 && mouse.x < i * 110 + 155) {
 							encontrado = false;
 							//Revisa si la planta a elegir se encuentra en el semillero del jugador
@@ -706,6 +708,35 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 							//Si no se encontró, se añade al semillero
 							if (!encontrado && pos_semillero < LIM_SEM) {
 								semillero[pos_semillero].plant = i + 1;
+								pos_semillero++;
+							}
+						}
+					}
+				}
+				if (mouse.y >= 300 && mouse.y < 410) {
+					//revisa en la segunda fila de plantas
+					for (int i{}; i < 8; i++) {
+						if (mouse.x >= i * 110 + 45 && mouse.x < i * 110 + 155) {
+							encontrado = false;
+							//Revisa si la planta a elegir se encuentra en el semillero del jugador
+							for (int j{}; j < pos_semillero; j++) {
+								if (semillero[j].plant == i + 9) {
+									//Lo está, por lo que elimina la planta del semillero
+									encontrado = true;
+									for (int k{ j }; k < pos_semillero; k++) {
+										if (k + 1 < LIM_SEM) {
+											semillero[k] = semillero[k + 1];
+										}
+										else {
+											semillero[k].plant = -2;
+										}
+									}
+									pos_semillero--;
+								}
+							}
+							//Si no se encontró, se añade al semillero
+							if (!encontrado && pos_semillero < LIM_SEM) {
+								semillero[pos_semillero].plant = i + 9;
 								pos_semillero++;
 							}
 						}
@@ -736,7 +767,7 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 						aleat = rand() % 8 + 1;
 						for (int j{}; j <= i; j++) {
 							if (aleat == semillero[j].plant) {
-								aleat = rand() % 8 + 1;
+								aleat = rand() % CANT_PLANT + 1;
 								j = -1;
 							}
 						}
@@ -1206,13 +1237,13 @@ short animacion_planta(short x, short y, bool corte_vert) {
 		break;
 
 	case 4://NUEZ
-		if (planta[x][y].pv > 170) {
+		if (planta[x][y].pv > PV_PLANTA[4] * .6) {
 			return 0 + (planta[x][y].tiemp % 20 ? 0 : 1) * 360;
 		}
-		else if (planta[x][y].pv > 100 && planta[x][y].pv <= 170) {
+		else if (planta[x][y].pv > PV_PLANTA[4] * .4 && planta[x][y].pv <= PV_PLANTA[4] * .6) {
 			return 90 + (planta[x][y].tiemp % 18 ? 0 : 1) * 360;
 		}
-		else if (planta[x][y].pv > 40 && planta[x][y].pv <= 100) {
+		else if (planta[x][y].pv > PV_PLANTA[4] * .2 && planta[x][y].pv <= PV_PLANTA[4] * .4) {
 			return 180 + (planta[x][y].tiemp % 15 ? 0 : 1) * 360;
 		}
 		else {
@@ -1380,7 +1411,238 @@ short animacion_planta(short x, short y, bool corte_vert) {
 		}
 		break;
 
+	case 9://Seta desesporada
+		switch (planta[x][y].estado) {
+		case 0:
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 10 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 10 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: case 2:
+				return 0;
+			case 1:
+				return 90;
+			case 3: case 9:
+				return 180;
+			case 4: case 8:
+				return 270;
+			case 5: case 7:
+				return 360;
+			case 6:
+				return 450;
+			}
+			break;
+		case 1:
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: return 0;
+			case 1: return 540;
+			case 2: return 630;
+			default: return 720;
+			}
+			break;
+		}
+		break;
+
+	case 10://Seta solar
+		switch (planta[x][y].estado) {
+		case 0://Chiquita
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0:
+				return 0;
+			case 1: case 7:
+				return 90;
+			case 2: case 6:
+				return 180;
+			case 3: case 5:
+				return 270;
+			case 4:
+				return 360;
+			}
+			break;
+		case 1://Da sol chiquito
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 2 && !(frames % 7)) planta[x][y].animacion++;
+				else if (planta[x][y].animacion == 2 && planta[x][y].tiemp >= 9) planta[x][y].animacion++;
+			}
+			return planta[x][y].animacion * 90 + 450;
+			break;
+		case 2://Crece
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 5 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			}
+			return int(planta[x][y].animacion / LIM_F_PLANT) * 90 + 810;
+			break;
+		case 3://Grande
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 10 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 10 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0:
+				return 0;
+			case 1: case 9:
+				return 90;
+			case 2: case 8:
+				return 180;
+			case 3: case 7:
+				return 270;
+			case 4: case 6:
+				return 360;
+			case 5:
+				return 450;
+			}
+			break;
+		case 4://Da sol grande
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 3 && !(frames % 7)) planta[x][y].animacion++;
+				else if (planta[x][y].animacion == 3 && planta[x][y].tiemp >= 9) planta[x][y].animacion++;
+			}
+			return planta[x][y].animacion * 90 + 540;
+			break;
+		}
+		break;
+
+	case 11://Humoseta
+		switch (planta[x][y].estado) {
+		case 0:
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 10 * (LIM_F_PLANT * 2) - 1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 10 * (LIM_F_PLANT * 2) - 1) planta[x][y].animacion = 0;
+			}
+			switch (int(planta[x][y].animacion / (LIM_F_PLANT * 2))) {
+			case 0: case 4:
+				return 0;
+			case 1: case 3:
+				return 90;
+			case 2:
+				return 180;
+			case 5: case 9:
+				return 540;
+			case 6: case 8:
+				return 630;
+			case 7:
+				return 720;
+			}
+			break;
+		case 1:
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 12 * (LIM_F_PLANT * 1.25) - 1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 12 * (LIM_F_PLANT * 1.25) - 1) planta[x][y].animacion = 0;
+			}
+			if (int(planta[x][y].animacion / (LIM_F_PLANT * 1.25)) <= 9) {
+				return (int(planta[x][y].animacion / (LIM_F_PLANT * 1.25))) * 90 + 540;
+			}
+			else {
+				return (15 - int(planta[x][y].animacion / (LIM_F_PLANT * 1.25))) * 90;
+			}
+			break;
+		}
+		break;
+
+	case 12://Calabaza
+		if (!corte_vert) {	//Calabaza normal
+			if (planta[x][y].pv > PV_PLANTA[12] * .6) {
+				return 0;
+			}
+			else if (planta[x][y].pv > PV_PLANTA[12] * .4 && planta[x][y].pv <= PV_PLANTA[12] * .6) {
+				return 180;
+			}
+			else if (planta[x][y].pv > PV_PLANTA[12] * .2 && planta[x][y].pv <= PV_PLANTA[12] * .4) {
+				return 360;
+			}
+			else {
+				return 540;
+			}
+		}
+		else {				//Fondo calabaza
+			if (planta[x][y].pv > PV_PLANTA[12] * .6) {
+				return 90;
+			}
+			else if (planta[x][y].pv > PV_PLANTA[12] * .4 && planta[x][y].pv <= PV_PLANTA[12] * .6) {
+				return 270;
+			}
+			else if (planta[x][y].pv > PV_PLANTA[12] * .2 && planta[x][y].pv <= PV_PLANTA[12] * .4) {
+				return 450;
+			}
+			else {
+				return 630;
+			}
+		}
+		break;
+
+	case 13://Hipnoseta WIP
+		break;
+
+	case 14://Seta miédica
+		switch (planta[x][y].estado) {
+		case 0://no hace nada
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 8 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 8 * LIM_F_PLANT - 1) planta[x][y].animacion = 0;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0:
+				return 0;
+			case 1: case 7:
+				return 90;
+			case 2: case 6:
+				return 180;
+			case 3: case 5:
+				return 270;
+			case 4:
+				return 360;
+			}
+			break;
+		case 1://Dispara
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: return 0;
+			case 1: return 450;
+			case 2: return 540;
+			default: return 630;
+			}
+			break;
+		case 2://Se esconde
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			}
+			switch (int(planta[x][y].animacion / LIM_F_PLANT)) {
+			case 0: return 720;
+			case 1: return 810;
+			case 2: return 900;
+			default: return 990;
+			}
+			break;
+		case 3://Se esconde
+			if (!pausa_total) {
+				if (!(frames % 7)) {
+					short frame_ant = planta[x][y].animacion;
+					do {
+						planta[x][y].animacion = rand() % 4;
+					} while (frame_ant == planta[x][y].animacion);
+				}
+			}
+			switch (planta[x][y].animacion) {
+			case 0: return 1080;
+			case 1: return 1170;
+			case 2: return 1260;
+			case 3: return 1350;
+			}
+			break;
+		}
+		break;
 	}
+	//Caso base
 	return 0;
 }
 
@@ -1580,6 +1842,14 @@ bool funcion_proyectil(Proyectil &proy, short fila) {
 				zomb_atacado->tiemp = 60;
 				proy.tipo = -2;
 				break;
+			case 2://Espora desesporada
+				zomb_atacado->pv -= 1;
+				proy.tipo = -3;
+				break;
+			case 3://Espora Miédica
+				zomb_atacado->pv -= 1;
+				proy.tipo = -4;
+				break;
 			}
 			if (zomb_atacado->anim_danio < 18) {
 				zomb_atacado->anim_danio = 24;
@@ -1599,10 +1869,10 @@ bool funcion_proyectil(Proyectil &proy, short fila) {
 			}
 			cant_proy[fila]--;
 			delete& proy;
-			return 1;
+			return true;
 		}
 	}
-	return 0;
+	return false;
 }
 
 void generar_proyectil(Proyectil *proy, short y, short tipo, short pos_x) {
@@ -1636,11 +1906,11 @@ void generar_proyectil(Proyectil *proy, short y, short tipo, short pos_x) {
 
 bool mover_proyectil(Proyectil& proy, short pos_y) {
 	if (pausa_total) {
-		return 0;
+		return false;
 	}
 	if (proy.tipo < 0) {
 		proy.x += 1;
-		return 0;
+		return false;
 	}
 	if (proy.x > RESOL_X) {
 		if (proy.sig_proy) {
@@ -1653,10 +1923,10 @@ bool mover_proyectil(Proyectil& proy, short pos_y) {
 		cant_proy[pos_y]--;
 		std::cout << "POSICION ELIMINADA: " << &proy << std::endl;
 		delete& proy;
-		return 1;
+		return true;
 	}
 	proy.x += 5;
-	return 0;
+	return false;
 }
 
 /*----------FUNCIONES-ZOMBIE----------------------------------------------------------------------------------------------*/
@@ -2460,14 +2730,14 @@ void inicializar_juego() {
 	frames_indep = 0;
 	cant_zombi_elim = 0;
 	cant_sol_recol = 0;
-	soles_guard = 50;
+	soles_guard = 5000;
 	planta_elegida = 0;
 	anim_sobre_tablero = 0;
 
 	b.plantas_dia = al_load_bitmap("Sprites/Plants/Plants_Daytime.png");
+	b.plantas_noche = al_load_bitmap("Sprites/Plants/Plants_Nighttime.png");
 	b.chomper_anim = al_load_bitmap("Sprites/Plants/Chomper_Bite.png");
 	b.semillero_bitmap = al_load_bitmap("Sprites/Extra/Seedpackets_Bitmap.png");
-	b.semillero_recarga = al_load_bitmap("Sprites/Extra/Delay_Seedpacket.png");
 	b.pala_cursor = al_load_bitmap("Sprites/Plants/Shovel.png");
 	b.pala_interfaz = al_load_bitmap("Sprites/Extra/Shovel_Hud.png");
 	b.sol_bitmap = al_load_bitmap("Sprites/Extra/Sun_Bitmap.png");
@@ -2560,7 +2830,6 @@ void finalizar_juego() {
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.pala_interfaz);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.pala_cursor);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.sol_bitmap);
-	al_destroy_bitmap((ALLEGRO_BITMAP*)b.semillero_recarga);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.explosion);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.guisante);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.zombie_bitmap);
@@ -2865,12 +3134,25 @@ void dibujar_selector() {
 	//Dibujar semillero
 	for (int i{ 0 }; i < LIM_SEM; i++) {
 		if (semillero[i].plant != -2) {
-			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, (semillero[i].plant - 1) * 110, 0, 110, 110, i * 110 + 150, 0, 0);
-			dibujar_numero(COST_PLANTA[semillero[i].plant], i * 110 + 215, 74, NORM_C);
-			if (mouse.x >= i * 110 + 150 && mouse.x < i * 110 + 260 && mouse.y <= 110) {
-				//Cambiar sprite de cursor
-				if (mouse.estado == 0)
-					mouse.estado = 1;
+			if (semillero[i].plant >= 1 && semillero[i].plant <= 8) {
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, 990, 0, 110, 110, i * 110 + 150, 0, 0);
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, (semillero[i].plant - 1) * 110, 0, 110, 110, i * 110 + 150, 0, 0);
+				dibujar_numero(COST_PLANTA[semillero[i].plant], i * 110 + 215, 74, NORM_C);
+				if (mouse.x >= i * 110 + 150 && mouse.x < i * 110 + 260 && mouse.y <= 110) {
+					//Cambiar sprite de cursor
+					if (mouse.estado == 0)
+						mouse.estado = 1;
+				}
+			}
+			else if (semillero[i].plant >= 9 && semillero[i].plant <= 16) {
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, 990, 110, 110, 110, i * 110 + 150, 0, 0);
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, (semillero[i].plant - 9) * 110, 110, 110, 110, i * 110 + 150, 0, 0);
+				dibujar_numero(COST_PLANTA[semillero[i].plant], i * 110 + 215, 74, NORM_C);
+				if (mouse.x >= i * 110 + 150 && mouse.x < i * 110 + 260 && mouse.y <= 110) {
+					//Cambiar sprite de cursor
+					if (mouse.estado == 0)
+						mouse.estado = 1;
+				}
 			}
 		}
 		else {
@@ -2888,12 +3170,25 @@ void dibujar_selector() {
 				en_semillero = true;
 			}
 		}
-		al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, color_aux, i * 110, 0, 110, 110, i * 110 + 45 + mov_x, 190, 0);
-		dibujar_numero(COST_PLANTA[i + 1], i * 110 + 110 + mov_x, 264, color_aux);
-		if (mouse.x >= i * 110 + 45 && mouse.x < i * 110 + 155 && mouse.y >= 190 && mouse.y < 300 && (pos_semillero < LIM_SEM || en_semillero)) {
-			//Cambiar sprite de cursor
-			if (mouse.estado == 0)
-				mouse.estado = 1;
+		if (i >= 0 && i < 8) {
+			al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, color_aux, 990, 0, 110, 110, i * 110 + 45 + mov_x, 190, 0);
+			al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, color_aux, i * 110, 0, 110, 110, i * 110 + 45 + mov_x, 190, 0);
+			dibujar_numero(COST_PLANTA[i + 1], i * 110 + 110 + mov_x, 264, color_aux);
+			if (mouse.x >= i * 110 + 45 && mouse.x < i * 110 + 155 && mouse.y >= 190 && mouse.y < 300 && (pos_semillero < LIM_SEM || en_semillero)) {
+				//Cambiar sprite de cursor
+				if (mouse.estado == 0)
+					mouse.estado = 1;
+			}
+		}
+		else if (i >= 8 && i < CANT_PLANT) {
+			al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, color_aux, 990, 110, 110, 110, (i - 8) * 110 + 45 + mov_x, 300, 0);
+			al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, color_aux, (i - 8) * 110, 110, 110, 110, (i - 8) * 110 + 45 + mov_x, 300, 0);
+			dibujar_numero(COST_PLANTA[i + 1], (i - 8) * 110 + 110 + mov_x, 374, color_aux);
+			if (mouse.x >= (i - 8) * 110 + 45 && mouse.x < (i - 8) * 110 + 155 && mouse.y >= 300 && mouse.y < 410 && (pos_semillero < LIM_SEM || en_semillero)) {
+				//Cambiar sprite de cursor
+				if (mouse.estado == 0)
+					mouse.estado = 1;
+			}
 		}
 	}
 
@@ -3049,12 +3344,34 @@ void dibujar_tablero() {
 		//Dibujar plantas
 		for (int x{}; x < CAS_X; x++) {
 			if (planta[x][y].pos) {
-				if (planta[x][y].pos >= 0 && planta[x][y].pos <= 8) {
-					char color = planta[x][y].anim_danio > 0 ? 255 - planta[x][y].anim_danio * 7 : 255;
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgb(255, color, color), (planta[x][y].pos - 1) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
-					if (planta[x][y].anim_danio > 0) {
-						planta[x][y].anim_danio--;
+				char color = planta[x][y].anim_danio > 0 ? 255 - planta[x][y].anim_danio * 7 : 255;
+				switch (planta[x][y].pos) {
+				case 10://Seta solar
+					if (planta[x][y].estado > 2) {
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 720, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
 					}
+					else {
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+					}
+					break;
+
+				case 12://Calabaza
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 270, animacion_planta(x, y, true), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 270, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+					break;
+
+				default://Cualquier otra planta
+					if (planta[x][y].pos >= 0 && planta[x][y].pos <= 8) {
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgb(255, color, color), (planta[x][y].pos - 1) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+
+					}
+					else if (planta[x][y].pos >= 9 && planta[x][y].pos <= 16) {
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), (planta[x][y].pos - 9) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+					}
+					break;
+				}
+				if (planta[x][y].anim_danio > 0) {		//Animación daño
+					planta[x][y].anim_danio--;
 				}
 			}
 		}
@@ -3206,11 +3523,31 @@ void dibujar_tablero() {
 				if (!(frames % 6)) {
 					ptr_proy->tiempo_ev++;
 				}
-				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28, ptr_proy->tipo * -28, 28, 28, ptr_proy->x, y * 100 + 189, 1);
+				switch (ptr_proy->tipo) {
+				case -1: case -2://Guisantes
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28, ptr_proy->tipo * -28, 28, 28, ptr_proy->x, y * 100 + 189, 1);
+					break;
+				case -3://Espora desesporada
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28 + 112, 28, 28, 28, ptr_proy->x, y * 100 + 218, 1);
+					break;
+				case -4://Espora Miédica
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28 + 112, 28, 28, 28, ptr_proy->x, y * 100 + 197, 1);
+					break;
+				}
 			}
 			else {
 				short movimiento = pausa_total ? 0 : rand() % 3;
-				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, y * 100 + 189 + movimiento, 0);
+				switch (ptr_proy->tipo) {
+				case 0: case 1://Guisantes
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, y * 100 + 189 + movimiento, 0);
+					break;
+				case 2://Esporas mini
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, 112 + (int(ptr_proy->x) % 3) * 28, 0, 28, 28, ptr_proy->x, y * 100 + 218 + movimiento, 0);
+					break;
+				case 3://Esporas miédica
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, 112 + (int(ptr_proy->x) % 3) * 28, 0, 28, 28, ptr_proy->x, y * 100 + 197 + movimiento, 0);
+					break;
+				}
 			}
 		}
 
@@ -3223,9 +3560,11 @@ void dibujar_tablero() {
 					color_aux = al_map_rgba(trans, trans, trans, trans);
 					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, (int(planta[x][y].animacion / LIM_F_EXPLO)) * 200, 300, 200, 200, x * 100 + 145, y * 100 + 75, 0);
 					if (planta[x][y].tiemp <= 12) {
+						short temblor_y = pausa_total ? 2 : rand() % 6;
+						short temblor_x = pausa_total ? 2 : rand() % 6;
 						trans = planta[x][y].tiemp > 10 ? 255 - (planta[x][y].tiemp - 10) * 100 : 255;
 						color_aux = al_map_rgba(trans, trans, trans, trans);
-						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, 1800, 300, 300, 200, x * 100 + 93 + rand() % 6, y * 100 + 113 + rand() % 6, 0);
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, 1800, 300, 300, 200, x * 100 + 93 + temblor_x, y * 100 + 113 + temblor_y, 0);
 					}
 					sobre_dibujo++;
 				}
@@ -3260,10 +3599,12 @@ void dibujar_tablero() {
 			if (planta[x][y].pos) {
 				//Explosión petacereza
 				if (planta[x][y].pos == 3 && planta[x][y].estado >= 1) {
+					short temblor_y = pausa_total ? 2 : rand() % 6;
+					short temblor_x = pausa_total ? 2 : rand() % 6;
 					short trans = planta[x][y].animacion > 10 ? 255 - (planta[x][y].animacion - 10) * 100 : 255;
 					color_aux = al_map_rgba(trans, trans, trans, trans);
 					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.explosion, planta[x][y].animacion * 300, 0, 300, 300, x * 100 + 95, y * 100 + 65, 0);
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, 2100, 300, 300, 200, x * 100 + 93 + rand() % 6, y * 100 + 113 + rand() % 6, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, 2100, 300, 300, 200, x * 100 + 93 + temblor_x, y * 100 + 113 + temblor_y, 0);
 					sobre_dibujo++;
 				}
 			}
@@ -3393,16 +3734,31 @@ void dibujar_tablero() {
 		if (semillero[i].plant != -2) {
 			if (planta_elegida != semillero[i].plant) {
 				//Mostrar disponibilidad de plantas
-				color_aux = soles_guard >= COST_PLANTA[semillero[i].plant] ? al_map_rgb(255, 255, 255) : al_map_rgb(255, 31, 95);
-				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, (semillero[i].plant - 1) * 110, 0, 110, 110, i * 110 + 150, 0, 0);
+				color_aux = soles_guard >= COST_PLANTA[semillero[i].plant] ? NORM_C : al_map_rgb(255, 31, 95);
+				if (semillero[i].plant >= 1 && semillero[i].plant <= 8) {
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, 990, 0, 110, 110, i * 110 + 150, 0, 0);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, (semillero[i].plant - 1) * 110, 0, 110, 110, i * 110 + 150, 0, 0);
+				}
+				else if (semillero[i].plant >= 9 && semillero[i].plant <= 16) {
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, 990, 110, 110, 110, i * 110 + 150, 0, 0);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, (semillero[i].plant - 9) * 110, 110, 110, 110, i * 110 + 150, 0, 0);
+				}
 				if (semillero[i].recarga > 0) {
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_recarga, al_map_rgba(90, 80, 90, 211), 0, 0, 110, (((float)semillero[i].recarga / REC_PLANTA[semillero[i].plant]) * 60 + 8), i * 110 + 150, 0, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, al_map_rgba(90, 75, 90, 211), 880, 110, 110, (((float)semillero[i].recarga / REC_PLANTA[semillero[i].plant]) * 60 + 8), i * 110 + 150, 0, 0);
 				}
 				dibujar_numero(COST_PLANTA[semillero[i].plant], i * 110 + 215, 74, color_aux);
 			}
 			else {
-				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, al_map_rgb(64, 64, 64), (semillero[i].plant - 1) * 110, 0, 110, 110, i * 110 + 150, 0, 0);
-				dibujar_numero(COST_PLANTA[semillero[i].plant], i * 110 + 215, 74, al_map_rgb(64, 64, 64));
+				if (semillero[i].plant >= 1 && semillero[i].plant <= 8) {
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, M_NORM_C(64), 990, 0, 110, 110, i * 110 + 150, 0, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, M_NORM_C(64), (semillero[i].plant - 1) * 110, 0, 110, 110, i * 110 + 150, 0, 0);
+				}
+				else if (semillero[i].plant >= 9 && semillero[i].plant <= 16) {
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, M_NORM_C(64), 990, 110, 110, 110, i * 110 + 150, 0, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.semillero_bitmap, M_NORM_C(64), (semillero[i].plant - 9) * 110, 110, 110, 110, i * 110 + 150, 0, 0);
+
+				}
+				dibujar_numero(COST_PLANTA[semillero[i].plant], i * 110 + 215, 74, M_NORM_C(64));
 			}
 		}
 		else {
@@ -3668,6 +4024,10 @@ void dibujar_cursor() {
 		if (planta_elegida) {
 			if (planta_elegida >= 1 && planta_elegida <= 8) {
 				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgba(165, 165, 165, 200), (planta_elegida - 1) * 90, 0, 90, 90, mouse.x - 45, mouse.y - 45, 0);
+				return;
+			}
+			else if (planta_elegida >= 9 && planta_elegida <= 16) {
+				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgba(165, 165, 165, 200), (planta_elegida - 9) * 90, 0, 90, 90, mouse.x - 45, mouse.y - 45, 0);
 				return;
 			}
 			else if (planta_elegida == -1) {

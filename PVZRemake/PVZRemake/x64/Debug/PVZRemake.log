@@ -1,3 +1,3 @@
 ﻿  PVZRemake.cpp
-C:\Users\Rodrigo\Documents\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(3221,14): warning C4267: '=': conversión de 'size_t' a 'short'; posible pérdida de datos
+C:\Users\Rodrigo\Documents\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(3414,14): warning C4267: '=': conversión de 'size_t' a 'short'; posible pérdida de datos
   PVZRemake.vcxproj -> C:\Users\Rodrigo\Documents\GitHub\Equipo-2-ISC-2-A\PVZRemake\x64\Debug\PVZRemake.exe

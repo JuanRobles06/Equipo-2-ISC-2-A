@@ -1,7 +1,12 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\Users\\Rodrigo\\Documents\\GitHub\\Equipo-2-ISC-2-A\\",
-  "Documents": [],
+  "WorkspaceRootPath": "C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:PVZRemake\\PVZRemake.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    }
+  ],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -9,7 +14,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": -1,
+          "SelectedChildIndex": 8,
           "Children": [
             {
               "$type": "Bookmark",
@@ -42,6 +47,19 @@
             {
               "$type": "Bookmark",
               "Name": "ST:128:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "PVZRemake.cpp",
+              "DocumentMoniker": "C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp",
+              "RelativeDocumentMoniker": "PVZRemake\\PVZRemake.cpp",
+              "ToolTip": "C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp",
+              "RelativeToolTip": "PVZRemake\\PVZRemake.cpp",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2025-08-22T02:00:59.747Z",
+              "EditorCaption": ""
             }
           ]
         }

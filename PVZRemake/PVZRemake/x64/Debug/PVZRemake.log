@@ -1,3 +1,7 @@
 ﻿  PVZRemake.cpp
-C:\Users\Rodrigo\Documents\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(3414,14): warning C4267: '=': conversión de 'size_t' a 'short'; posible pérdida de datos
-  PVZRemake.vcxproj -> C:\Users\Rodrigo\Documents\GitHub\Equipo-2-ISC-2-A\PVZRemake\x64\Debug\PVZRemake.exe
+C:\Users\rodri\OneDrive\Documentos\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(2027,3): warning C4065: switch statement contains 'default' but no 'case' labels
+C:\Users\rodri\OneDrive\Documentos\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(3798,3): warning C4156: deletion of an array expression without using the array form of 'delete'; array form substituted
+C:\Users\rodri\OneDrive\Documentos\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(3798,3): warning C4154: deletion of an array expression; conversion to pointer supplied
+C:\Users\rodri\OneDrive\Documentos\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(3919,14): warning C4267: '=': conversion from 'size_t' to 'short', possible loss of data
+C:\Users\rodri\OneDrive\Documentos\GitHub\Equipo-2-ISC-2-A\PVZRemake\PVZRemake.cpp(4926,19): warning C4101: 'tamanio': unreferenced local variable
+  PVZRemake.vcxproj -> C:\Users\rodri\OneDrive\Documentos\GitHub\Equipo-2-ISC-2-A\PVZRemake\x64\Debug\PVZRemake.exe

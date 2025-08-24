@@ -6,6 +6,8 @@
 #include <math.h>
 #include <allegro5/allegro5.h>
 #include <allegro5/allegro_image.h>
+#include <allegro5/allegro_audio.h>
+#include <allegro5/allegro_acodec.h>
 
 /*----------CONSTANTES----------------------------------------------------------------------------------------------------*/
 
@@ -26,6 +28,7 @@
 #define CANT_PLANT 16
 #define RESOL_X 1280
 #define RESOL_Y 720
+#define TIEMPO_ESC 60
 
 #define CANT_REC 5
 
@@ -34,11 +37,16 @@
 #define TRANS_C al_map_rgba(204, 204, 204, 204)
 #define M_TRANS_C(t) al_map_rgba(t, t, t, t)
 
+#define al_draw al_draw_tinted_scaled_rotated_bitmap_region
+
+enum OPC_POS { OPC_NULL, OPC_INICIAR, OPC_MARCADOR, OPC_REINICIAR = 2, OPC_ALEAT, OPC_TIEMPO, OPC_CONTINUAR = 1, OPC_SONIDO = 3, OPC_IR_INICIO, OPC_CLICK_PAUSA = 1 };
+enum MOUSE_ESTADOS { MOUSE_EST_NORMAL, MOUSE_EST_APUNTA, MOUSE_EST_CLICK };
+
 /*----------CONSTANTES-PLANTAS--------------------------------------------------------------------------------------------*/
 
-const short COST_PLANTA[CANT_PLANT + 1]	{ 0, 100, 50, 150,  50,  25, 175, 150, 200,   0,  25,  75,  125,  75,  25,  75, 125 };
-const short PV_PLANTA[CANT_PLANT + 1]	{ 0,  20, 20,  20, 350,  15,  20,  20,  20,  10,  20,  20,  275,   1,  20,  20,  20 };
-const short REC_PLANTA[CANT_PLANT + 1]	{ 0,  60, 90, 600, 300, 300, 100,  90, 100,  80,  90, 100,  400, 300,  80, 800,1200 };
+const short COST_PLANTA	[CANT_PLANT + 1]{ 0, 100, 50, 150,  50,  25, 175, 150, 200,   0,  25,  75,  125,  75,  25,  75, 125 };
+const short PV_PLANTA	[CANT_PLANT + 1]{ 0,  20, 20,  20, 350,  15,  20,  20,  20,  10,  20,  20,  275,   1,  20,  20,  20 };
+const short REC_PLANTA	[CANT_PLANT + 1]{ 0,  60, 90, 600, 300, 300, 100,  90, 100,  80,  90, 100,  400, 0,  80, 800,1200 };
 const short EXTR_SOL_DIA[CANT_PLANT + 1]{ 0,   0,  0,   0,   0,   0,   0,   0,   0,  50,  50,  50,    0,  50,  50,  75,  75 };
 
 /*----------VARIABLES_GLOBALES--------------------------------------------------------------------------------------------*/
@@ -48,7 +56,7 @@ static unsigned long long frames{ 0 }, frames_indep{ 0 };
 static bool bucle{ true }, programa_corriendo{ true };
 
 static short cont, soles_guard{ 50 }, soles_guard_suma{ 0 }, plantas_en_semillero[LIM_SEM];
-static short cant_sol_tablero{ 0 }, cant_particulas{ 0 };
+static short cant_sol_tablero{ 0 }, cant_particulas[CAS_Y]{ 0,0,0,0,0 };
 static short cant_zombi[CAS_Y]{ 0,0,0,0,0 }, cant_zombi_ignorar[CAS_Y]{ 0,0,0,0,0 }, cant_proy[CAS_Y], anim_sobre_tablero{ 0 };
 static long cant_zombi_elim{ 0 }, cant_sol_recol{ 0 };
 
@@ -89,16 +97,17 @@ struct Sol {
 
 struct Proyectil {
 	short tiempo_ev;
-	float x;
+	float x, y;
 	Proyectil* ant_proy, * sig_proy;
 	short tipo;
+	short cas_x_ini;
 	union {
 		float trasl_x;		//Humo humoseta
 	}esp;
 }	static* proyectil[CAS_Y];
 
 struct Semillero {
-	short plant, recarga, costo;
+	short plant, recarga;
 	bool aleat;
 }	static  semillero[LIM_SEM];
 
@@ -120,6 +129,7 @@ struct Planta {
 	short pos, pv, estado;
 	int tiemp, animacion;
 	short anim_danio;
+	short dx, dy;
 	//Especialidades de cada planta
 	union {
 		short mordidas;		//Nuez
@@ -165,13 +175,18 @@ struct Imagenes {
 	void* plantas_noche;
 	void* chomper_anim;
 	void* semillero_bitmap;
-	void* pala_cursor;
-	void* pala_interfaz;
+	void* hud_juego_bitmap;
+	void* hud_pausa_bitmap;
 	void* sol_bitmap;
 	void* explosion;
 	void* guisante;
 	void* zombie_bitmap;
 	void* pantalla_blanca;
+	void* hipno_fondo;
+
+	//Buffers
+	void* sombra_buffer;
+	void* objetos_buffer;
 
 	//Imágenes fin del juego
 	void* fondo_plantas;
@@ -180,6 +195,7 @@ struct Imagenes {
 	struct {
 		void* display;
 		void* buffer;
+		void* hud_buffer;
 	}al;
 }	static b;
 
@@ -192,7 +208,7 @@ struct Particula {
 	6 - Corbata
 	7 - Pierna
 	*/
-	short id;
+	short id, fila;
 	short x, y;
 	short mov_x, impulso;
 	short angulo;
@@ -200,27 +216,36 @@ struct Particula {
 	short tiemp;
 	bool dir;
 	Particula *ant_part, *sig_part;
-}	static* particulas;
+}	static* particulas[CAS_Y];
 
 struct Cursor {
-	short x, y, estado, tiemp_b;
+	short x, y, estado, tiemp_esc;
+	short opc_sel;
 }		static mouse;
 
 struct Efectos_esp {
 	short tipo;
 	union {
-		//ID 1
+		//ID 1 y 2
 		struct {
 			short tiemp, tiemp_max;
 			float transp;
 			unsigned char r, g, b;
 		}pant;
+		//ID 3
+		struct {
+			short x;
+			short y;
+			short tiemp;
+			short aleatorio;
+		}expl;
 	};
 	Efectos_esp* ant, * sig;
 }	static *vfx;
 
 struct Transicion {
 	short id;
+	short pantalla_ir;
 	float y_global;
 	bool finalizado;
 	union {
@@ -258,13 +283,13 @@ struct Transicion {
 struct Record{
 	char nombre[3];
 	long long puntos;
-	long long tiempo;
+	unsigned long long tiempo;
 }		static guardar, *tabla;
 
 /*----------PROTOTIPOS----------------------------------------------------------------------------------------------------*/
 
 //INPUT
-void registrar_teclas(ALLEGRO_EVENT);
+void registrar_teclas(ALLEGRO_EVENT, bool);
 void registrar_mouse(ALLEGRO_EVENT, bool);
 void posicion_cursor(ALLEGRO_EVENT);
 
@@ -294,21 +319,27 @@ short animacion_zombie(Zombie&);
 
 //PARTICULAS
 bool funcion_particula(Particula&);
-void generar_particula(short, short, short, bool);
+void generar_particula(short, short, short, bool, short);
 void rotacion_particula_x(Particula&);
 float animacion_cabeza_part(Particula&);
 void oleadas_zombie();
 
 //EFECTOS
-bool funcion_efecto(Efectos_esp& eff);
+bool funcion_efecto(Efectos_esp&);
 void vfx_pantalla(short, short, short, float, short);
 void vfx_destello(short, short, short, float, short);
-Efectos_esp* generar_efecto();
+void vfx_explosion_petacereza(short, short);
+void vfx_explosion_petaseta(short, short);
+Efectos_esp* generar_efecto_fin();
+Efectos_esp* generar_efecto_ini();
 
 //DIBUJADO
 void dibujar_numero(long long, float, float, ALLEGRO_COLOR);
 void dibujar_texto(char*, short, short, ALLEGRO_COLOR);
 void dibujar_record(float, float);
+
+void dibujo_planta_sombra(Planta&, short, short);
+
 void dibujar_titulo();
 void dibujar_selector();
 void dibujar_tablero();
@@ -316,8 +347,12 @@ void dibujar_cursor();
 void dibujar_fin_juego();
 
 //EXTRA
-void funcion_semillero();
+void funcion_semillero(); 
+void cambiar_pantalla_ventana();
 void cambiar_pantalla_completa();
+void finalizar_ejecucion();
+void reescalar_pantalla();
+
 void guardar_record(Record);
 void cargar_record();
 void guardar_captura();
@@ -346,6 +381,8 @@ int main() {
 	mouse.estado = 0;
 	mouse.x = RESOL_X / 2;
 	mouse.y = RESOL_Y / 2;
+	mouse.opc_sel = OPC_NULL;
+	mouse.tiemp_esc = 0;
 
 	vfx = new Efectos_esp;
 	vfx-> ant = vfx->sig = NULL;
@@ -353,12 +390,17 @@ int main() {
 
 	std::cout << "INICIO DE PROGRAMA" << std::endl;
 
-	if (!al_init()) return -1;
-	if (!al_init_image_addon()) return -1;
-	if (!al_install_keyboard()) return -1;
-	if (!al_install_mouse()) return -1;
+	if (!al_init())				return -1;
+	if (!al_init_image_addon())	return -1;
+	if (!al_install_keyboard())	return -1;
+	if (!al_install_mouse())	return -1;
+	if (!al_install_audio())	return -1;
+	if (!al_init_acodec_addon())return -1;
+	if (!al_reserve_samples(16))return -1;
 
-	b.al.display = al_create_display(RESOL_X, RESOL_Y);
+	cambiar_pantalla_ventana();
+
+	b.al.display = al_create_display(resol_x, resol_y);
 	al_set_window_title((ALLEGRO_DISPLAY*)b.al.display, "Plantas Contra Zombies Remake");
 	al_set_display_icon((ALLEGRO_DISPLAY*)b.al.display, al_load_bitmap("Sprites/Icon.png"));
 	al_hide_mouse_cursor((ALLEGRO_DISPLAY*)b.al.display);
@@ -371,6 +413,7 @@ int main() {
 	b.cursor_bitmap = al_load_bitmap("Sprites/Extra/Cursor_Bitmap.png");
 	b.fuente_bitmap = al_load_bitmap("Sprites/Extra/Font_Bitmap.png");
 	b.arbustos_transicion = al_load_bitmap("Sprites/Transition_Bushes.png");
+	b.fondo_plantas = al_load_bitmap("Sprites/Plants_Background.png");
 
 	al_set_new_bitmap_flags(ALLEGRO_MIN_LINEAR | ALLEGRO_MAG_LINEAR);
 	b.al.buffer = al_create_bitmap(RESOL_X, RESOL_Y);
@@ -398,12 +441,18 @@ int main() {
 				switch (eventos.type) {
 					//Dibuja
 					case ALLEGRO_EVENT_TIMER:
+						if (mouse.tiemp_esc != 0) {
+							finalizar_ejecucion();
+						}
 						dibujar_titulo();
 						break;
 
 						//Registrar teclas
 					case ALLEGRO_EVENT_KEY_DOWN:
-						registrar_teclas(eventos);
+						registrar_teclas(eventos, false);
+						break;
+					case ALLEGRO_EVENT_KEY_UP:
+						registrar_teclas(eventos, true);
 						break;
 
 						//Registrar botones mouse
@@ -439,13 +488,20 @@ int main() {
 				switch (eventos.type) {
 					//Dibuja
 				case ALLEGRO_EVENT_TIMER:
+					if (mouse.tiemp_esc != 0) {
+						finalizar_ejecucion();
+					}
 					dibujar_selector();
 					break;
 
 					//Registrar teclas
 				case ALLEGRO_EVENT_KEY_DOWN:
-					registrar_teclas(eventos);
+					registrar_teclas(eventos, false);
 					break;
+				case ALLEGRO_EVENT_KEY_UP:
+					registrar_teclas(eventos, true);
+					break;
+
 
 					//Registrar botones mouse
 				case ALLEGRO_EVENT_MOUSE_BUTTON_DOWN:
@@ -477,6 +533,9 @@ int main() {
 				switch (eventos.type) {
 					//El juego avanza
 				case ALLEGRO_EVENT_TIMER:
+					if (mouse.tiemp_esc != 0) {
+						finalizar_ejecucion();
+					}
 					//Revisar funciones
 					if (!pausa_total) {
 						oleadas_zombie();
@@ -545,8 +604,12 @@ int main() {
 
 					//Registrar teclas
 				case ALLEGRO_EVENT_KEY_DOWN:
-					registrar_teclas(eventos);
+					registrar_teclas(eventos, false);
 					break;
+				case ALLEGRO_EVENT_KEY_UP:
+					registrar_teclas(eventos, true);
+					break;
+
 
 					//Registrar botones mouse
 				case ALLEGRO_EVENT_MOUSE_BUTTON_DOWN:
@@ -581,14 +644,21 @@ int main() {
 				switch (eventos.type) {
 					//Dibuja
 				case ALLEGRO_EVENT_TIMER:
+					if (mouse.tiemp_esc != 0) {
+						finalizar_ejecucion();
+					}
 					dibujar_fin_juego();
 					frames++;
 					break;
 
 					//Registrar teclas
 				case ALLEGRO_EVENT_KEY_DOWN:
-					registrar_teclas(eventos);
+					registrar_teclas(eventos, false);
 					break;
+				case ALLEGRO_EVENT_KEY_UP:
+					registrar_teclas(eventos, true);
+					break;
+
 
 					//Registrar botones mouse
 				case ALLEGRO_EVENT_MOUSE_BUTTON_DOWN:
@@ -636,6 +706,7 @@ int main() {
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.cursor_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fuente_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.arbustos_transicion);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_plantas);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.al.buffer);
 }
 
@@ -648,10 +719,20 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 		switch (evento.mouse.button) {
 		case ALLEGRO_MOUSE_BUTTON_LEFT:
 			if (presionado && tr.id == -1) {
+				mouse.opc_sel = OPC_NULL;
+
+				if (mouse.x >= 836 && mouse.x < 1115 && mouse.y >= 198 && mouse.y < 368) {
+					mouse.opc_sel = OPC_INICIAR;
+				}
+
+				if (mouse.x >= 857 && mouse.x < 1099 && mouse.y >= 368 && mouse.y < 443) {
+					mouse.opc_sel = OPC_MARCADOR;
+				}
+
 				mouse.estado = 2;
 			}
 			else if (tr.id == -1) {
-				if (mouse.x >= 836 && mouse.x < 1115 && mouse.y >= 198 && mouse.y < 368 && mouse.estado == 2) {
+				if (mouse.x >= 836 && mouse.x < 1115 && mouse.y >= 198 && mouse.y < 368 && mouse.estado == 2 && mouse.opc_sel == OPC_INICIAR) {
 					//Iniciar transición al semillero
 					tr.id = 3;
 					tr.finalizado = false;
@@ -663,7 +744,7 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 					}
 				}
 
-				if (mouse.x >= 857 && mouse.x < 1099 && mouse.y >= 368 && mouse.y < 443) {
+				if (mouse.x >= 857 && mouse.x < 1099 && mouse.y >= 368 && mouse.y < 443 && mouse.estado == 2 && mouse.opc_sel == OPC_MARCADOR) {
 					if (tr.y_global <= 0) {
 						tr.y_global = 565;
 					}
@@ -682,6 +763,8 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 		switch (evento.mouse.button) {
 		case ALLEGRO_MOUSE_BUTTON_LEFT:
 			if (presionado && tr.id == -1) {
+				mouse.opc_sel = OPC_NULL;
+
 				//Buscar ratón en la selección de semillas
 				if (mouse.y <= 110) {
 					for (int i{}; i < pos_semillero; i++) {
@@ -757,11 +840,24 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 						}
 					}
 				}
+				//Buscar ratón en el Botón de inicio ronda
+				if (mouse.x >= 45 && mouse.x < 265 && mouse.y >= 445 && mouse.y < 575) {
+					mouse.opc_sel = OPC_INICIAR;
+				}//Buscar ratón en el Botón reinicio
+				if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575) {
+					mouse.opc_sel = OPC_REINICIAR;
+				}//buscar ratón en el Botón aleatorio
+				if (mouse.x >= 495 && mouse.x < 620 && mouse.y >= 445 && mouse.y < 575) {
+					mouse.opc_sel = OPC_ALEAT;
+				}//buscar ratón en el Botón de tiempo
+				if (mouse.x >= 630 && mouse.x < 755 && mouse.y >= 445 && mouse.y < 575) {
+					mouse.opc_sel = OPC_TIEMPO;
+				}
 				mouse.estado = 2;
 			}
 			else if (tr.id == -1) {
 				//Buscar ratón en el Botón de inicio ronda
-				if (mouse.x >= 45 && mouse.x < 265 && mouse.y >= 445 && mouse.y < 575) {
+				if (mouse.x >= 45 && mouse.x < 265 && mouse.y >= 445 && mouse.y < 575 && mouse.opc_sel == OPC_INICIAR) {
 					soles_guard_suma = 50;
 					tr.finalizado = false;
 					tr.id = 2;
@@ -771,13 +867,13 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 					tr.juego_ini.tiemp = 0;
 					tr.juego_ini.text_act = -1;
 				}//Buscar ratón en el Botón reinicio
-				if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575) {
+				if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575 && mouse.opc_sel == OPC_REINICIAR) {
 					for (int i{}; i < LIM_SEM; i++) {
 						semillero[i].plant = -2;
 					}
 					pos_semillero = 0;
 				}//buscar ratón en el Botón aleatorio
-				if (mouse.x >= 495 && mouse.x < 620 && mouse.y >= 445 && mouse.y < 575) {
+				if (mouse.x >= 495 && mouse.x < 620 && mouse.y >= 445 && mouse.y < 575 && mouse.opc_sel == OPC_ALEAT) {
 					for (int i{}, aleat; i < LIM_SEM; i++) {
 						aleat = rand() % CANT_PLANT + 1;
 						for (int j{}; j <= i; j++) {
@@ -791,7 +887,7 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 					}
 					pos_semillero = LIM_SEM;
 				}//buscar ratón en el Botón de tiempo
-				if (mouse.x >= 630 && mouse.x < 755 && mouse.y >= 445 && mouse.y < 575) {
+				if (mouse.x >= 630 && mouse.x < 755 && mouse.y >= 445 && mouse.y < 575 && mouse.opc_sel == OPC_TIEMPO) {
 					tr.y_global = 255;
 					tipo_patio = tipo_patio % 2 ? tipo_patio - 1 : tipo_patio + 1;
 				}
@@ -806,7 +902,12 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 		switch (evento.mouse.button) {
 		case ALLEGRO_MOUSE_BUTTON_LEFT:
 			if (presionado) {
-				mouse.estado = 2;
+				mouse.estado = MOUSE_EST_CLICK;
+				//Botón pausa
+				if (mouse.x >= RESOL_X - 110 && mouse.x < RESOL_X && mouse.y > 0 && mouse.y < 110) {
+					pausa_total = fin_juego ? 1 : !pausa_total;
+				}
+				//Juego Normal
 				if (!pausa_total) {
 					if (mouse.y >= 160) {
 						plantar_planta();
@@ -815,9 +916,45 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 						seleccionar_planta(0);
 					}
 				}
+				//Menú pausa
+				else {
+					//Botón Continuar
+					if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 && mouse.y >= 280 && mouse.y < 365) {
+						mouse.opc_sel = OPC_CONTINUAR;
+					}
+					//Botón Reiniciar
+					if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 && mouse.y >= 375 && mouse.y < 460) {
+						mouse.opc_sel = OPC_REINICIAR;
+					}
+					//Botón volumen
+					if (mouse.x >= RESOL_X / 2 - 105 && mouse.x < RESOL_X / 2 - 5 && mouse.y >= 460 && mouse.y < 555) {
+						mouse.opc_sel = OPC_SONIDO;
+					}
+					//Botón casa
+					if (mouse.x >= RESOL_X / 2 && mouse.x < RESOL_X / 2 + 100 && mouse.y >= 460 && mouse.y < 555) {
+						mouse.opc_sel = OPC_IR_INICIO;
+					}
+				}
 			}
 			else {
-				mouse.estado = 0;
+				mouse.estado = MOUSE_EST_NORMAL;
+				if (pausa_total) {
+					//Botón Continuar
+					if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 && mouse.y >= 280 && mouse.y < 365 && mouse.opc_sel == OPC_CONTINUAR) {
+						pausa_total = fin_juego ? 1 : !pausa_total;
+					}
+					//Botón Reiniciar
+					if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 && mouse.y >= 375 && mouse.y < 460 && mouse.opc_sel == OPC_REINICIAR) {
+						pantalla = 1;
+						tr.id = -1;
+					}
+					//Botón casa
+					if (mouse.x >= RESOL_X / 2 && mouse.x < RESOL_X / 2 + 100 && mouse.y >= 460 && mouse.y < 555 && mouse.opc_sel == OPC_IR_INICIO) {
+						pantalla = 0;
+						tr.id = -1;
+					}
+				}
+				mouse.opc_sel = OPC_NULL;
 			}
 			break;
 		}
@@ -825,62 +962,77 @@ void registrar_mouse(ALLEGRO_EVENT evento, bool presionado) {
 	}
 }
 
-void registrar_teclas(ALLEGRO_EVENT teclado) {
+void registrar_teclas(ALLEGRO_EVENT teclado, bool manten_presionado) {
 	char letra;
-	switch (pantalla) {
-	case 2://Tablero
-		switch (teclado.keyboard.keycode) {
-		default://teclas extra
-			if (teclado.keyboard.keycode >= 28 && teclado.keyboard.keycode <= 36 && !pausa_total) {
-				seleccionar_planta(teclado.keyboard.keycode - 27);
-			}
-			break;
-		case ALLEGRO_KEY_L:
-			if (!pausa_total)
-				seleccionar_planta(-1);
-			break;
-		case ALLEGRO_KEY_Z: generar_zombie(rand() % CAS_Y, rand() % 3); break;
-		case ALLEGRO_KEY_S: soles_guard += 1000; soles_guard_suma += 1000; break;
-		case ALLEGRO_KEY_ENTER:pausa_total = fin_juego ? 1 : !pausa_total; break;
-		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
-		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
-		case ALLEGRO_KEY_F5:	foto = true; break;
-		}
-		break;
-	case 3://Fin del juego
-		switch (teclado.keyboard.keycode) {
-		default://teclas extra
-			if (tr.fin.tiemp > 420 && tr.id == 5) {
-				if (teclado.keyboard.keycode >= ALLEGRO_KEY_A && teclado.keyboard.keycode <= ALLEGRO_KEY_Z) {
-					letra = (char)teclado.keyboard.keycode + 64;
-					guardar.nombre[indice_nombre % 3] = letra;
-					indice_nombre++;
-					if (indice_nombre >= 3) {
-						nom_compl = true;
-					}
-					std::cout << letra << std::endl;
+	if (!manten_presionado) {
+		switch (pantalla) {
+		case 2://Tablero
+			switch (teclado.keyboard.keycode) {
+			default://teclas extra
+				if (teclado.keyboard.keycode >= 28 && teclado.keyboard.keycode <= 36 && !pausa_total) {
+					seleccionar_planta(teclado.keyboard.keycode - 27);
 				}
+				break;
+			case ALLEGRO_KEY_L:
+				if (!pausa_total)
+					seleccionar_planta(-1);
+				break;
+			case ALLEGRO_KEY_Z: generar_zombie(rand() % CAS_Y, 3); break;
+			case ALLEGRO_KEY_S: soles_guard += 1000; soles_guard_suma += 1000; break;
+			case ALLEGRO_KEY_ENTER:
+				pausa_total = fin_juego ? 1 : !pausa_total;
+				break;
+			case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
+			case ALLEGRO_KEY_F5:	foto = true; break;
 			}
 			break;
-		case ALLEGRO_KEY_ENTER:
-			if (nom_compl) {
-				tr.id = 1;
-				tr.finalizado = false;
-				tr.arbustos.y = RESOL_Y;
+		case 3://Fin del juego
+			switch (teclado.keyboard.keycode) {
+			default://teclas extra
+				if (tr.fin.tiemp > 420 && tr.id == 5) {
+					if (teclado.keyboard.keycode >= ALLEGRO_KEY_A && teclado.keyboard.keycode <= ALLEGRO_KEY_Z) {
+						letra = (char)teclado.keyboard.keycode + 64;
+						guardar.nombre[indice_nombre % 3] = letra;
+						indice_nombre++;
+						if (indice_nombre >= 3) {
+							nom_compl = true;
+						}
+						std::cout << letra << std::endl;
+					}
+				}
+				break;
+			case ALLEGRO_KEY_ENTER:
+				if (nom_compl) {
+					tr.id = 1;
+					tr.finalizado = false;
+					tr.arbustos.y = RESOL_Y;
+				}
+				break;
+			case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
+			case ALLEGRO_KEY_F5:	foto = true; break;
 			}
 			break;
-		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
-		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
-		case ALLEGRO_KEY_F5:	foto = true; break;
+		default:
+			switch (teclado.keyboard.keycode) {
+			case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
+			case ALLEGRO_KEY_F5:	foto = true; break;
+			}
+			break;
 		}
-		break;
-	default:
-		switch (teclado.keyboard.keycode) {
-		case ALLEGRO_KEY_ESCAPE: bucle = false; programa_corriendo = false; break;
-		case ALLEGRO_KEY_F: cambiar_pantalla_completa(); break;
-		case ALLEGRO_KEY_F5:	foto = true; break;
+		if (teclado.keyboard.keycode == ALLEGRO_KEY_ESCAPE) {
+			mouse.tiemp_esc = 1;
 		}
-		break;
+	}
+	else {
+		if (teclado.keyboard.keycode == ALLEGRO_KEY_ESCAPE) {
+			if (mouse.tiemp_esc <= 6) {
+				bucle = false;
+				programa_corriendo = false;
+			}
+			else {
+				mouse.tiemp_esc = 0;
+			}
+		}
 	}
 }
 
@@ -950,17 +1102,17 @@ void funcion_planta(short x,short y) {
 					planta[x][y].tiemp = 0;
 					planta[x][y].animacion = 0;
 					planta[x][y].estado = 1;
+					vfx_explosion_petacereza(x * 100 + 95, y * 100 + 65);
 					for (int sx{ -1 }; sx <= 1; sx++) {
 						if (x + sx >= 0 && x + sx < CAS_X_EXPL) {
 							for (int sy{ -1 }; sy <= 1; sy++) {
 								if (y + sy >= 0 && y + sy < CAS_Y) {
-									explosion_tablero[x + sx][y + sy].danio += 100;
+									explosion_tablero[x + sx][y + sy].danio += 200;
 									explosion_tablero[x + sx][y + sy].tipo_area = 1;
 								}
 							}
 						}
 					}
-					anim_sobre_tablero++;
 				}
 				break;
 			case 1://Evita hacer daño doble
@@ -968,22 +1120,16 @@ void funcion_planta(short x,short y) {
 					if (x + sx >= 0 && x + sx < CAS_X_EXPL) {
 						for (int sy{ -1 }; sy <= 1; sy++) {
 							if (y + sy >= 0 && y + sy < CAS_Y) {
-								explosion_tablero[x + sx][y + sy].danio -= 100;
+								explosion_tablero[x + sx][y + sy].danio -= 200;
 								explosion_tablero[x + sx][y + sy].tipo_area = 0;
 							}
 						}
 					}
 				}
-				planta[x][y].estado = 2;
-				break;
-			case 2://Termina de explotar
-				if (planta[x][y].animacion > 11 ) {
-					anim_sobre_tablero--;
-					eliminar_planta(planta[x][y]);
-				}
+				eliminar_planta(planta[x][y]);
 				break;
 			}
-		case 4://NUEZ
+		case 4: case 12: //NUEZ y CALABAZA
 			planta[x][y].esp.mordidas = 0;
 			break;
 		case 5://PAPAPUM
@@ -1095,80 +1241,52 @@ void funcion_planta(short x,short y) {
 			}
 			break;
 		case 10://HONGO SOLAR
-			if (planta[x][y].esp.crecimiento == 0 && planta[x][y].estado == 1) {
-				planta[x][y].estado = 2;
-				planta[x][y].animacion = 0;
-			}
 			if (planta[x][y].estado == 2 && planta[x][y].animacion >= 5 * LIM_F_PLANT - 1) {
 				planta[x][y].estado = 3;
 				planta[x][y].animacion = 0;
 			}
 			if (planta[x][y].estado == 1 || planta[x][y].estado == 4) {
 				//Generar soles
-				if ((planta[x][y].tiemp >= 12 && planta[x][y].estado == 1) ||
-					(planta[x][y].tiemp >= 14 && planta[x][y].estado == 4)) {
-					int sol_cinco{ 0 }, sol_diez{ 0 }, sol_quince{ 0 };
+				if ((planta[x][y].tiemp >= 10 && planta[x][y].estado == 1) ||
+					(planta[x][y].tiemp >= 12 && planta[x][y].estado == 4)) {
+					int sol_max, sol_gen{ 0 };
 					planta[x][y].animacion = 8 * LIM_F_PLANT + rand() % LIM_F_PLANT;
 					planta[x][y].tiemp = 0;
 					if (planta[x][y].estado == 1) {
+						sol_max = 3;
 						planta[x][y].estado = 0;
 						planta[x][y].esp.crecimiento--;
-						sol_quince = rand() % 2;
-						if (sol_quince == 0) {
-							sol_diez = rand() % 2;
-							for (int i{ sol_diez - 1 }; i < 0; i++) {
-								sol_cinco += 2;
-							}
-							sol_cinco += 1;
-							for (int i{ sol_cinco }; i > 0; i--) {
-								generar_sol_recolect(x * 100 + 195, y * 100 + 165, 5);
-							}
-							if (sol_diez > 0) {
-								generar_sol_recolect(x * 100 + 195, y * 100 + 165, 10);
-							}
+						while (sol_max > 0) {
+							sol_gen = rand() % sol_max + 1;
+							sol_max -= sol_gen;
+							generar_sol_recolect(x * 100 + 195, y * 100 + 165, sol_gen * 5);
 						}
-						else {
-							generar_sol_recolect(x * 100 + 195, y * 100 + 165, 15);
+						if (planta[x][y].esp.crecimiento <= 0) {
+							planta[x][y].estado = 2;
+							planta[x][y].animacion = 0;
 						}
-						
 					}
 					else if (planta[x][y].estado == 4) {
+						sol_max = 5;
 						planta[x][y].estado = 3;
-						//Asigna los valores de los soles
-						sol_quince = rand() % 2;
-						if (sol_quince == 0) {
-							sol_cinco += 1;
-							sol_diez = rand() % 3;
-							//Genera los soles de 5
-							for (int i{ sol_diez - 2 }; i < 0; i++) {
-								sol_cinco += 2;
+						while (sol_max > 0) {
+							if (sol_max > 3) {
+								sol_gen = rand() % 3 + 1;
 							}
-						}
-						else {
-							sol_diez = rand() % 2;
-							//Genera los soles de 5
-							for (int i{ sol_diez - 1 }; i < 0; i++) {
-								sol_cinco += 2;
+							else {
+								sol_gen = rand() % sol_max + 1;
 							}
-						}
-						//Aparecen los soles en el tablero
-						for (int i{ sol_cinco }; i > 0; i--) {
-							generar_sol_recolect(x * 100 + 195, y * 100 + 165, 5);
-						}
-						for (int i{ sol_diez }; i > 0; i--) {
-							generar_sol_recolect(x * 100 + 195, y * 100 + 165, 10);
-						}
-						if (sol_quince) {
-							generar_sol_recolect(x * 100 + 195, y * 100 + 165, 15);
+							sol_max -= sol_gen;
+							generar_sol_recolect(x * 100 + 195, y * 100 + 165, sol_gen * 5);
 						}
 					}
 				}
 			}
 			else if (planta[x][y].estado == 0 || planta[x][y].estado == 3) {
-				short tiemp_espera{ 10 };
+				short tiemp_espera{ 10 };	//Espera personalizada para cada uno de los estados
 				//cambio de estado: soles
 				if (planta[x][y].estado == 0) {
-					tiemp_espera = 100;
+					tiemp_espera = 110;
 				}
 				else {
 					tiemp_espera = 120;
@@ -1187,7 +1305,7 @@ void funcion_planta(short x,short y) {
 			}
 			break;
 		case 11://Humoseta
-			if (planta[x][y].estado == 0 && planta[x][y].tiemp >= 6 + rand() % 3 && planta[x][y].esp.zombie_detect) {
+			if (planta[x][y].estado == 0 && planta[x][y].tiemp >= 4 + rand() % 3 && planta[x][y].esp.zombie_detect) {
 				planta[x][y].estado = 1;
 				planta[x][y].animacion = 0;
 				planta[x][y].tiemp = 0;
@@ -1205,38 +1323,6 @@ void funcion_planta(short x,short y) {
 					case 9:
 						if (planta[x][y].esp.zombie_detect) {
 							generar_proyectil(proyectil[y], y, planta[x][y].pos, x);
-							explosion_tablero[x][y].danio += 1;
-						}
-						break;
-					case 10:
-						explosion_tablero[x + 1][y].danio += 1;
-						explosion_tablero[x][y].danio -= 1;
-						break;
-					case 11:
-						explosion_tablero[x + 2][y].danio += 1;
-						explosion_tablero[x + 1][y].danio -= 1;
-						break;
-					case 12:
-						explosion_tablero[x + 2][y].danio -= 1;
-						break;
-					case 13:
-						if (x + 3 < CAS_X_EXPL) {
-							explosion_tablero[x + 3][y].danio += 1;
-						}
-						break;
-					case 14:
-						if (x + 3 < CAS_X_EXPL) {
-							explosion_tablero[x + 3][y].danio -= 1;
-						}
-						break;
-					case 15:
-						if (x + 4 < CAS_X_EXPL) {
-							explosion_tablero[x + 4][y].danio += 1;
-						}
-						break;
-					case 16:
-						if (x + 4 < CAS_X_EXPL) {
-							explosion_tablero[x + 4][y].danio -= 1;
 						}
 						break;
 					}
@@ -1245,9 +1331,10 @@ void funcion_planta(short x,short y) {
 			break;
 		case 14://SETA MIEDICA
 			//Se esconde si detecta un zombi cerca
-			if (planta[x][y].estado < 2 && planta[x][y].esp.zombie_detect) {
+			if (planta[x][y].estado <= 1 && planta[x][y].esp.zombie_detect) {
 				planta[x][y].estado = 2;
 				planta[x][y].animacion = 0;
+				planta[x][y].tiemp = 0;
 			}
 			switch (planta[x][y].estado) {
 			case 0://Normal
@@ -1268,18 +1355,25 @@ void funcion_planta(short x,short y) {
 			case 2://Animación esconderse
 				if (planta[x][y].animacion >= 4 * LIM_F_PLANT - 1) {
 					planta[x][y].estado = 3;
+					planta[x][y].tiemp = 0;
 					planta[x][y].animacion = 0;
 				}
 				break;
 			case 3://Escondida
 				if (!planta[x][y].esp.zombie_detect) {
-					if (planta[x][y].esp.zombie_detect) {
-						planta[x][y].esp.zombie_detect = false;
-					}
-					else {
-						planta[x][y].estado = 0;
-						planta[x][y].animacion = 0;
-					}
+					planta[x][y].estado = 4;
+					planta[x][y].tiemp = 0;
+					planta[x][y].animacion = 0;
+				}
+				if (planta[x][y].esp.zombie_detect && planta[x][y].tiemp > 5) {
+					planta[x][y].esp.zombie_detect = false;
+				}
+				break;
+			case 4://Animación esconderse
+				if (planta[x][y].animacion >= 4 * (LIM_F_PLANT / 2) - 1) {
+					planta[x][y].estado = 0;
+					planta[x][y].tiemp = 0;
+					planta[x][y].animacion = 0;
 				}
 				break;
 			}
@@ -1302,6 +1396,48 @@ void funcion_planta(short x,short y) {
 				eliminar_planta(planta[x][y]);
 			}
 			break;
+		case 16://Petaseta
+			switch(planta[x][y].estado) {
+			case 0://se infla
+				if (planta[x][y].animacion >= 5 * LIM_F_PLANT - 1) {
+					planta[x][y].tiemp = 0;
+					planta[x][y].animacion = 0;
+					planta[x][y].estado = 1;
+					vfx_destello(228, 203, 251, 0.95, 100);
+					vfx_explosion_petaseta(x * 100 + 95, y * 100);
+					for (int sx{ -3 }; sx <= 3; sx++) {
+						if (x + sx >= 0 && x + sx < CAS_X_EXPL) {
+							for (int sy{ -3 }; sy <= 3; sy++) {
+								if (y + sy >= 0 && y + sy < CAS_Y) {
+									explosion_tablero[x + sx][y + sy].danio += 500;
+									explosion_tablero[x + sx][y + sy].tipo_area = 1;
+								}
+							}
+						}
+					}
+				}
+				break;
+			case 1://Evita hacer daño doble
+				for (int sx{ -3 }; sx <= 3; sx++) {
+					if (x + sx >= 0 && x + sx < CAS_X_EXPL) {
+						for (int sy{ -3 }; sy <= 3; sy++) {
+							if (y + sy >= 0 && y + sy < CAS_Y) {
+								explosion_tablero[x + sx][y + sy].danio -= 500;
+								explosion_tablero[x + sx][y + sy].tipo_area = 0;
+							}
+						}
+					}
+				}
+				eliminar_planta(planta[x][y]);
+				generar_planta(-2, planta[x][y]);
+				break;
+			}
+			break;
+		case -2: //Cráter
+			if (planta[x][y].tiemp >= 1500) {
+				eliminar_planta(planta[x][y]);
+			}
+			break;
 		}
 		if (!pausa_total) {
 			planta[x][y].tiemp++;
@@ -1314,10 +1450,18 @@ void generar_planta(short id_planta, Planta& planta) {
 	planta.pos = id_planta;
 	planta.tiemp = 0;
 	planta.estado = 0;
+
 	planta.animacion = 0;
 	planta.anim_danio = 0;
+
+	planta.dx = rand() % 13 - 6;
+	planta.dy = rand() % 13 - 6;
+
 	switch (id_planta) {
-	case 4://Nuez
+	case 2://Girasol
+		planta.tiemp = 20 + rand() % 10;
+		break;
+	case 4: case 12://Nuez y Calabaza
 		planta.esp.mordidas = 0;
 		break;
 	case 7://Carroñívora
@@ -1327,10 +1471,14 @@ void generar_planta(short id_planta, Planta& planta) {
 		planta.esp.repet = 0;
 		break;
 	case 10://Seta Solar
-		planta.esp.crecimiento = 6;
+		planta.tiemp = 15 + rand() % 25;
+		planta.esp.crecimiento = 11;
 		break;
 	case 11: case 9: case 14://Humoseta Honguito, seta miedica
 		planta.esp.zombie_detect = false;
+		break;
+	case -2:
+		planta.pv = 1;
 		break;
 	}
 	std::cout << "PV[" << id_planta << "] = " << planta.pv << std::endl;
@@ -1363,13 +1511,12 @@ void plantar_planta() {
 				if (semillero[semillero_elegido].aleat) {
 					short planta_ant = semillero[semillero_elegido].plant;
 					do {
-						semillero[semillero_elegido].plant = rand() % 8 + 1;
+						semillero[semillero_elegido].plant = rand() % CANT_PLANT + 1;
 					} while (semillero[semillero_elegido].plant == planta_ant);
 				}
 				generar_planta(planta_elegida, planta[pos_x][pos_y]);
 				semillero_elegido = -1;
 				std::cout << "PLANTA " << planta_elegida << " PLANTADA EN \t[" << pos_x << "][" << pos_y << "]" << std::endl;
-
 			}
 		}
 		//DESPLANTAR UNA PLANTA
@@ -1377,6 +1524,7 @@ void plantar_planta() {
 			eliminar_planta(planta[pos_x][pos_y]);
 			std::cout << "ASESINATO EN \t\t[" << pos_x << "][" << pos_y << "]" << std::endl;
 		}
+		semillero_elegido = -1;
 		planta_elegida = 0;
 	}
 }
@@ -1508,9 +1656,6 @@ short animacion_planta(short x, short y, bool corte_vert) {
 			}
 			return int(planta[x][y].animacion / LIM_F_PLANT) * 90;
 		default:
-			if (!pausa_total) {
-				if (!(frames % (LIM_F_EXPLO))) planta[x][y].animacion++;
-			}
 			return -90;
 		}
 		break;
@@ -1630,7 +1775,7 @@ short animacion_planta(short x, short y, bool corte_vert) {
 
 				case 6: case 9: case 12:
 					if (!(rand() % 32) && !pausa_total) {
-						generar_particula(x * 100 + 168, y * 100 + 130, rand() % 3 + 5, rand() % 2);
+						generar_particula(x * 100 + 168, y * 100 + 130, rand() % 3 + 5, rand() % 2, y);
 					}
 					return 1260;
 
@@ -1856,7 +2001,30 @@ short animacion_planta(short x, short y, bool corte_vert) {
 		}
 		break;
 
-	case 13://Hipnoseta WIP
+	case 13://Hipnoseta
+		switch (planta[x][y].estado) {
+		default:
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 12 * (LIM_F_PLANT * 1.25) -1) planta[x][y].animacion++;
+				else if (planta[x][y].animacion >= 12 * (LIM_F_PLANT * 1.25) - 1) planta[x][y].animacion = 0;
+			}
+			switch (int(planta[x][y].animacion / (LIM_F_PLANT * 1.25))) {
+			case 0: case 11:
+				return 90;
+			case 10:
+				return 180;
+			case 1: case 9:
+				return 270;
+			case 2: case 8:
+				return 360;
+			case 3: case 7:
+				return 450;
+			case 4:
+				return 540;
+			case 5: case 6:
+				return 630;
+			}
+		}
 		break;
 
 	case 14://Seta miédica
@@ -1890,7 +2058,7 @@ short animacion_planta(short x, short y, bool corte_vert) {
 			default: return 630;
 			}
 			break;
-		case 2://Se esconde
+		case 2://Ve un zombi
 			if (!pausa_total) {
 				if (planta[x][y].animacion < 4 * LIM_F_PLANT - 1) planta[x][y].animacion++;
 			}
@@ -1915,6 +2083,17 @@ short animacion_planta(short x, short y, bool corte_vert) {
 			case 1: return 1170;
 			case 2: return 1260;
 			case 3: return 1350;
+			}
+			break;
+		case 4://Sale
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 4 * (LIM_F_PLANT / 2) -1) planta[x][y].animacion++;
+			}
+			switch (int(planta[x][y].animacion / (LIM_F_PLANT / 2))) {
+			default: return 720;
+			case 2: return 810;
+			case 1: return 900;
+			case 0: return 990;
 			}
 			break;
 		}
@@ -1943,6 +2122,30 @@ short animacion_planta(short x, short y, bool corte_vert) {
 			break;
 		}
 		break;
+
+	case 16://Petaseta
+		switch (planta[x][y].estado) {
+		case 0:
+			if (!pausa_total) {
+				if (planta[x][y].animacion < 5 * LIM_F_PLANT - 1) planta[x][y].animacion++;
+			}
+			return int(planta[x][y].animacion / LIM_F_PLANT) * 90;
+		default:
+			return -90;
+		}
+		break;
+
+	case -2://cráter
+		if (planta[x][y].tiemp < 800) {
+			return 450;
+		}
+		else if (planta[x][y].tiemp < 1200) {
+			return 540;
+		}
+		else {
+			return 630;
+		}
+		break;
 	}
 	//Caso base
 	return 0;
@@ -1952,6 +2155,7 @@ short animacion_planta(short x, short y, bool corte_vert) {
 
 bool funcion_sol(Sol& sol, short pos) {
 	short x, y;
+	float rango;
 	//Es cualquier estado excepto el 3
 	if (sol.estado_act != 3) {
 		//Encontrar la posición vertical del sol
@@ -1981,13 +2185,19 @@ bool funcion_sol(Sol& sol, short pos) {
 			break;
 		}
 		//revisar si el mouse está en la zona de recolección del sol
-		if (mouse.x > x - 160.0 * sol.tam && mouse.x < x + 160.0 * sol.tam && mouse.y > y - 160.0 * sol.tam && mouse.y < y + 160.0 * sol.tam) {
+		if (mouse.estado == 2) {
+			rango = 420;
+		}
+		else {
+			rango = 180;
+		}
+		if (mouse.x > x - rango * sol.tam && mouse.x < x + rango * sol.tam && mouse.y > y - rango * sol.tam && mouse.y < y + rango * sol.tam) {
 			std::cout << "SOL RECOLECTADO" << std::endl;
 			cant_sol_recol += sol.cant;
 			soles_guard += sol.cant;
 			soles_guard_suma += sol.cant;
-			oleada.puntos += 10;
-			oleada.puntos_sum += 10;
+			oleada.puntos += 10 * float(sol.cant) / 25;
+			oleada.puntos_sum += 10 * float(sol.cant) / 25;
 			sol.x = x;
 			sol.y = y;
 			sol.estado.recol.mov_x = x - 40;
@@ -2029,7 +2239,7 @@ bool funcion_sol(Sol& sol, short pos) {
 	}
 	return 0;
 }
-
+            
 float animacion_sol(Sol& sol) {
 	short direccion = sol.estado.anim.d ? 1: -1;
 	//Determinar dirección a la que se dirigirá el sol
@@ -2087,8 +2297,8 @@ void generar_sol_recolect(short pos_x, short pos_y, short cant) {
 	if (pos_y) {
 		nuevo_sol->estado_act = 0;
 		nuevo_sol->x = pos_x + 22;
-		nuevo_sol->y = pos_y + 60 - rand() % 6 * 12;
-		nuevo_sol->estado.anim.impulso = (rand() % 5 + 1) * 5 + 20;
+		nuevo_sol->y = pos_y + 60 - rand() % 12 * 6;
+		nuevo_sol->estado.anim.impulso = (rand() % 25 + 1) + 20;
 		nuevo_sol->estado.anim.d = rand() % 2;
 		nuevo_sol->estado.anim.mov_x = 0;
 	}
@@ -2109,6 +2319,43 @@ bool funcion_proyectil(Proyectil &proy, short fila) {
 	//Busca un zombie a atacar
 	if (proy.tipo >= 0) {
 		if (proy.tipo == 4) {
+			short x = proy.cas_x_ini;
+			switch(proy.tiempo_ev){
+			case 0:
+				explosion_tablero[x][fila].danio += 1;
+				break;
+			case 1:
+				explosion_tablero[x + 1][fila].danio += 1;
+				explosion_tablero[x][fila].danio -= 1;
+				break;
+			case 2:
+				explosion_tablero[x + 2][fila].danio += 1;
+				explosion_tablero[x + 1][fila].danio -= 1;
+				break;
+			case 3:
+				explosion_tablero[x + 2][fila].danio -= 1;
+				break;
+			case 4:
+				if (x + 3 < CAS_X_EXPL) {
+					explosion_tablero[x + 3][fila].danio += 1;
+				}
+				break;
+			case 5:
+				if (x + 3 < CAS_X_EXPL) {
+					explosion_tablero[x + 3][fila].danio -= 1;
+				}
+				break;
+			case 6:
+				if (x + 4 < CAS_X_EXPL) {
+					explosion_tablero[x + 4][fila].danio += 1;
+				}
+				break;
+			case 7:
+				if (x + 4 < CAS_X_EXPL) {
+					explosion_tablero[x + 4][fila].danio -= 1;
+				}
+				break;
+			}
 			if (proy.esp.trasl_x >= 0) {
 				goto Eliminar_proyectil;
 			}
@@ -2199,6 +2446,7 @@ void generar_proyectil(Proyectil *proy, short y, short tipo, short pos_x) {
 	}
 	//Generar nuevo espacio en memoria
 	nuevo_proy->sig_proy = new Proyectil;
+
 	//asignar nuevo espacio en memoria
 	anterior_proy = nuevo_proy;
 	nuevo_proy= nuevo_proy->sig_proy;
@@ -2207,29 +2455,38 @@ void generar_proyectil(Proyectil *proy, short y, short tipo, short pos_x) {
 	nuevo_proy->ant_proy = anterior_proy;
 	nuevo_proy->sig_proy = NULL;
 
+	//Asignar campos
+	nuevo_proy->y = 0;
+	nuevo_proy->cas_x_ini = pos_x;
 	switch (tipo) {
 	case 1: case 8://Lanzaguisantes y repetidora
+		nuevo_proy->y = y * 100 + 189;
 		nuevo_proy->x = pos_x * 100 + 270;
 		nuevo_proy->tipo = 0;
 		break;
 	case 6://Hielaguisantes
+		nuevo_proy->y = y * 100 + 189;
 		nuevo_proy->x = pos_x * 100 + 270;
 		nuevo_proy->tipo = 1;
 		break;
 	case 9://Honguito Desesporado
+		nuevo_proy->y = y * 100 + 218;
 		nuevo_proy->x = pos_x * 100 + 250;
 		nuevo_proy->tipo = 2;
 		break;
 	case 14://Honguito Chillón
+		nuevo_proy->y = y * 100 + 200;
 		nuevo_proy->x = pos_x * 100 + 270;
 		nuevo_proy->tipo = 3;
 		break;
 	case 11://Humoseta
+		nuevo_proy->y = y * 100 + 100;
 		nuevo_proy->esp.trasl_x = -360;
 		nuevo_proy->x = pos_x * 100 + 195 - nuevo_proy->esp.trasl_x;
 		nuevo_proy->tipo = 4;
 		break;
 	}
+	nuevo_proy->y += planta[pos_x][y].dy;
 	nuevo_proy->tiempo_ev = 0;
 	cant_proy[y]++;
 }
@@ -2280,13 +2537,13 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 			break;
 		case 2://Congelado
 			zomb.estado = 1;
-			zomb.tiemp = 40;
+			zomb.tiemp = 100;
 			break;
 		}
 	}
 	//revisar estado del zombi
 	if (zomb.pv > 0) {
-		short casilla = -1,columna = -1;
+		short casilla = -1;
 		int sx = 0;
 
 		//generar partículas
@@ -2297,7 +2554,7 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 			}
 			else if (zomb.pv <= 10 && zomb.est_danio == 3) {
 				zomb.est_danio = 0;
-				generar_particula(zomb.x, fila * 100 + 120, 1, 1);
+				generar_particula(zomb.x, fila * 100 + 120, 1, 1, fila);
 			}
 			break;
 		case 2://Cubeta
@@ -2306,13 +2563,39 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 			}
 			else if (zomb.pv <= 10 && zomb.est_danio == 3) {
 				zomb.est_danio = 0;
-				generar_particula(zomb.x, fila * 100 + 120, 2, 1);
+				generar_particula(zomb.x, fila * 100 + 120, 2, 1, fila);
+			}
+			break;
+		case 3://Ladrillo
+			if (zomb.pv <= 96 && zomb.est_danio == 4) {
+				zomb.est_danio = 5;
+				for (int i{ rand() % 2 + 1 }; i > 0; i--) {
+					generar_particula(zomb.x, fila * 100 + 120, 8, 1, fila);
+				}
+			}
+			if (zomb.pv <= 40 && zomb.est_danio == 5) {
+				zomb.est_danio = 2;
+				for (int i{ rand() % 3 + 1 }; i > 0; i--) {
+					generar_particula(zomb.x, fila * 100 + 120, 8, 1, fila);
+				}
+			}
+			if (zomb.pv <= 18 && zomb.est_danio == 2) {
+				zomb.est_danio = 3;
+				for (int i{ rand() % 4 + 1 }; i > 0; i--) {
+					generar_particula(zomb.x, fila * 100 + 120, 8, 1, fila);
+				}
+			}
+			if (zomb.pv <= 10 && zomb.est_danio == 3) {
+				zomb.est_danio = 0;
+				for (int i{ rand() % 2 + 1 }; i > 0; i--) {
+					generar_particula(zomb.x, fila * 100 + 120, 8, 1, fila);
+				}
 			}
 			break;
 		}
 		if (zomb.pv < 5 && zomb.est_danio == 0) {
 			zomb.est_danio = 1;
-			generar_particula(zomb.x, fila * 100 + 120, 5, 1);
+			generar_particula(zomb.x, fila * 100 + 120, 5, 1, fila);
 		}
 
 		//Encontrar Casilla
@@ -2369,17 +2652,17 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 				if (planta[casilla][fila].pos) {
 					if (!(zomb.estado == 1 && frames % 20) && zomb.estado != 2) {
 						switch (planta[casilla][fila].pos) {
-						case 4://Nuez
+						case 4: case 12://Nuez y calabaza
 							if (planta[casilla][fila].esp.mordidas < 3) {//es una nuez
 								planta[casilla][fila].pv--;
 								planta[casilla][fila].esp.mordidas++;
-							}
-							if (!planta[casilla][fila].anim_danio) { //animación de daño de la planta
-								planta[casilla][fila].anim_danio = 24;
+								if (!planta[casilla][fila].anim_danio) { //animación de daño de la planta
+									planta[casilla][fila].anim_danio = 24;
+								}
 							}
 							zomb.comiendo = true;
 							break;
-						case 3: case 15: case 16://Petacereza, Seta congelada y Petaseta
+						case -2: case 3: case 15: case 16://Petacereza, Seta congelada y Petaseta
 							break;
 						case 5://Papapum
 							if (planta[casilla][fila].estado) {
@@ -2419,41 +2702,58 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 			//Busca una papapum
 			for (int x{ sx + 1 }; x <= 0; x++) {
 				if (planta[casilla + x][fila].pos == 5&& planta[casilla + x][fila].estado == 3) {
-					zomb.pv -= 200;
+					zomb.pv -= 100;
 					if (zomb.pv <= 0) {
 						if (zomb.est_danio >= 2) {
+							short cant_part{ 0 }, cant_part_obl{ 1 };
 							switch (zomb.id) { //Suelta el gorrito
-							case 1: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 3 : 1, 1); break;
-							case 2: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 4 : 2, 1); break;
+							case 1: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 3 : 1, 1, fila); break;
+							case 2: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 4 : 2, 1, fila); break;
+							case 3://Ladrillo
+								switch (zomb.est_danio) {
+								case 4: cant_part = 10;cant_part_obl = 3;	break;
+								case 5: cant_part = 8; cant_part_obl = 3;	break;
+								case 2: cant_part = 6; cant_part_obl = 2;	break;
+								case 3: cant_part = 3;						break;
+								}
+								for (int i{ rand() % cant_part + cant_part_obl }; i > 0; i--) {
+									generar_particula(zomb.x, fila * 100 + 120, 8, 1, fila);
+								}
+								break;
 							}
 						}
 						//Genera una partícula brazo, pierna o corbata
-						generar_particula(zomb.x, fila * 100 + 120, rand() % 3 + 5, 1);
+						generar_particula(zomb.x, fila * 100 + 120, rand() % 3 + 5, 1, fila);
 						goto eliminar_zombie;
 					}
 				}
 			}
 
 			//Busca plantas en un rango
-			for (int x{ casilla - 4 }; x <= casilla; x++) {
-				if (x >= 0 && x < CAS_X) {
-					//Busca la humoseta
-					if (planta[x][fila].pos == 11 && !planta[x][fila].esp.zombie_detect) {
-						planta[x][fila].esp.zombie_detect = true;
-					}
-					if (x >= casilla - 3) {
-						//Busca la seta desesporada
-						if (planta[x][fila].pos == 9 && !planta[x][fila].esp.zombie_detect) {
-							planta[x][fila].esp.zombie_detect = true;
+			for (int y{ fila - 1 }; y <= fila + 1; y++) {
+				if (y >= 0 && y < CAS_Y) {
+					for (int x{ casilla - 4 }; x <= casilla  + 1; x++) {
+						if (x >= 0 && x < CAS_X) {
+							//Revisa enfrente
+							if (x <= casilla && y == fila) {
+								//Busca la humoseta
+								if (planta[x][fila].pos == 11 && !planta[x][fila].esp.zombie_detect) {
+									planta[x][fila].esp.zombie_detect = true;
+								}
+								if (x >= casilla - 3) {
+									//Busca la seta desesporada
+									if (planta[x][fila].pos == 9 && !planta[x][fila].esp.zombie_detect) {
+										planta[x][fila].esp.zombie_detect = true;
+									}
+								}
+							}
+							if (x >= casilla - 1 && x <= casilla + 1) {
+								if (planta[x][y].pos == 14) {
+									planta[x][y].esp.zombie_detect = true;
+									planta[x][y].tiemp = 0;
+								}
+							}
 						}
-					}
-				}
-			}
-
-			for (int x{ casilla - 1 }; x <= casilla + 1; x++) {
-				for (int y{ columna - 1 }; y <= columna + 1; y++) {
-					if (planta[x][y].pos == 14 && !planta[x][y].esp.zombie_detect) {
-						planta[x][y].esp.zombie_detect = true;
 					}
 				}
 			}
@@ -2472,12 +2772,24 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 					case 1://Carroñivora hace daño
 						if (int(planta[casilla + x][fila].animacion / LIM_F_PLANT) == 2) {
 							if (zomb.est_danio >= 2) {
+								short cant_part{ 0 }, cant_part_obl{ 1 };
 								switch (zomb.id) {
-								case 1: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 3 : 1, 1); break;
-								case 2: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 4 : 2, 1); break;
+								case 1: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 3 : 1, 1, fila); break;
+								case 2: generar_particula(zomb.x, fila * 100 + 120, zomb.est_danio == 2 ? 4 : 2, 1, fila); break;
+								case 3://Ladrillo
+									switch (zomb.est_danio) {
+									case 4: cant_part = 10; cant_part_obl = 3;	break;
+									case 5: cant_part = 8; cant_part_obl = 3;	break;
+									case 2: cant_part = 6; cant_part_obl = 2;	break;
+									case 3: cant_part = 3;						break;
+									}
+									for (int i{ rand() % cant_part + cant_part_obl }; i > 0; i--) {
+										generar_particula(zomb.x, fila * 100 + 120, 8, 1, fila);
+									}
+									break;
 								}
 							}
-							generar_particula(zomb.x, fila * 100 + 120, 0, 1);
+							generar_particula(zomb.x, fila * 100 + 120, 0, 1, fila);
 							planta[casilla + x][fila].esp.coord_zomb = zomb.x;
 							planta[casilla + x][fila].estado = 2;
 							goto eliminar_zombie;
@@ -2495,7 +2807,7 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 			zomb.tiemp_muert++;
 		}
 		if (zomb.est_danio >= 0) {
-			generar_particula(zomb.x, fila * 100 + 120, 0, 1);
+			generar_particula(zomb.x, fila * 100 + 120, 0, 1, fila);
 			zomb.tiemp_muert = 0;
 			zomb.est_danio = -1;
 		}
@@ -2522,6 +2834,7 @@ bool funcion_zombie(Zombie& zomb, short fila) {
 			case 0:	oleada.puntos += 100;	oleada.puntos_sum += 100;	break;
 			case 1:	oleada.puntos += 200;	oleada.puntos_sum += 200;	break;
 			case 2:	oleada.puntos += 500;	oleada.puntos_sum += 500;	break;
+			case 3:	oleada.puntos += 1200;	oleada.puntos_sum += 1200;	break;
 			}
 			cant_zombi_elim++;
 			if (zomb.sig_zomb) {
@@ -2617,7 +2930,11 @@ void generar_zombie(short y, short tipo) {
 	case 2://Zombie cara cubo
 		nuevo_zomb->pv = 65;
 		nuevo_zomb->est_danio = 2;
-		break;	
+		break;
+	case 3://Zombie cara ladrillo
+		nuevo_zomb->pv = 165;
+		nuevo_zomb->est_danio = 4;
+		break;
 	}
 
 	nuevo_zomb->animacion = 0;
@@ -2654,7 +2971,7 @@ void oleadas_zombie() {
 		generar_nueva_oleada:
 		oleada.zombie_ataq += oleada.dificultad;//Bajar el tiempo para la siguiente oleada
 		if (oleada.tiempo_oleada > oleada.lim_tiempo_oleada && frames > FRAMES_INI) {
-			oleada.tiempo_oleada -= (oleada.tiempo_oleada * .08) + (oleada.puntos + frames) * .0000001 - 1;//MODIFICADO 0.8 org
+			oleada.tiempo_oleada -= (oleada.tiempo_oleada * .04) + (oleada.puntos + frames) * .00000001 - 1;//MODIFICADO 0.8 org
 		}//Si es menor a limiteTiempoOleada, se hace limiteTiempoOleada
 		if (oleada.tiempo_oleada < oleada.lim_tiempo_oleada) {
 			oleada.tiempo_oleada = oleada.lim_tiempo_oleada;
@@ -2667,57 +2984,83 @@ void oleadas_zombie() {
 	}
 
 	//GENERAR ZOMBIES EN EL TABLERO
-	generacion = (20 * float(oleada.dificultad) / (oleada.zombie_ataq + 1));
-	if (generacion > 20) {
-		generacion = 20;
-	}
-	else if (generacion <= 0) {
-		generacion = 1;
-	}
-	if (frames % generacion == 0 && !(rand() % 4)) {
-		bool zomb_aparecido[CAS_Y], lleno{ false };
-		for (int i{}; i < CAS_Y; i++) {
-			if (cant_zombi[i] > total_zomb / CAS_Y) {
-				zomb_aparecido[i] = true;
-			}
-			else {
-				zomb_aparecido[i] = false;
-			}
+	if (oleada.zombie_ataq > 0) {
+		generacion = (20 * float(oleada.dificultad) / (oleada.zombie_ataq + 1));
+		if (generacion > 20) {
+			generacion = 20;
 		}
-		while (oleada.zombie_ataq > 0 && !lleno) {
-			short fila_aparicion, cant_aparicion{ 0 };
-			random_zomb = rand() % oleada.zombie_ataq + 1;
+		else if (generacion <= 0) {
+			generacion = 1;
+		}
+		if (frames % generacion == 0 && !(rand() % 4)) {
+			bool zomb_aparecido[CAS_Y], lleno{ false };
+			float mult_dificult;
+
+			//Determinar filas en las que pueden aparecer zombis
 			for (int i{}; i < CAS_Y; i++) {
-				if (zomb_aparecido[i]) {
-					cant_aparicion++;
+				if (cant_zombi[i] > total_zomb / CAS_Y) {
+					zomb_aparecido[i] = true;
 				}
-				if (cant_aparicion >= CAS_Y) {
-					lleno = true;
+				else {
+					zomb_aparecido[i] = false;
+				}
+			}
+
+			//Spawnear zombis
+			while (oleada.zombie_ataq > 0 && !lleno) {
+				short fila_aparicion, cant_aparicion{ 0 };
+				random_zomb = rand() % oleada.zombie_ataq + 1;		//Elegir zombi aleatorio
+
+				//Revisar si no se spawnearon la cantidad necesaria de zombis
+				for (int i{}; i < CAS_Y; i++) {
+					if (zomb_aparecido[i]) {
+						cant_aparicion++;
+					}
+					if (cant_aparicion >= CAS_Y) {
+						lleno = true;
+						break;
+					}
+				}
+				if (lleno) {
 					break;
 				}
-			}
-			if (lleno) {
-				break;
-			}
-			do {
-				fila_aparicion = rand() % CAS_Y;
-			} while (zomb_aparecido[fila_aparicion]);
-			if (random_zomb <= 2) {
-				zombie_dif = 0;
-				oleada.zombie_ataq -= 1;
-			}
-			else if (random_zomb > 2 && random_zomb <= 5) {
-				zombie_dif = 1;
-				oleada.zombie_ataq -= 3;
-			}
-			else if (random_zomb > 5){
-				zombie_dif = 2;
-				oleada.zombie_ataq -= 6;
-			}
-			zomb_aparecido[fila_aparicion] = true;
-			generar_zombie(fila_aparicion, zombie_dif);
-			if (!(rand() % ((CAS_Y - cant_aparicion) * 2))) {
-				break;
+
+				//Spawnear en una posición válida
+				do {
+					fila_aparicion = rand() % CAS_Y;
+				} while (zomb_aparecido[fila_aparicion]);
+
+				//Multiplicador de dificultad
+				mult_dificult = float(oleada.tiempo_oleada) / oleada.lim_tiempo_oleada;
+				if (mult_dificult > 2) {
+					mult_dificult = 2;
+				}
+				mult_dificult -= -1 * frames < 36000 ? float(frames) / 36000 : 1;
+
+				//Seleccionar zombi a aparecer
+				if (random_zomb < 3) {
+					zombie_dif = 0;
+					oleada.zombie_ataq -= 1;
+				}
+				else if (random_zomb >= 3 && random_zomb < 6) {
+					zombie_dif = 1;
+					oleada.zombie_ataq -= 3;
+				}
+				else if (random_zomb >= 6 && random_zomb < 13) {
+					zombie_dif = 2;
+					oleada.zombie_ataq -= 6;
+					oleada.tiempo += oleada.tiempo_oleada * .05 * mult_dificult;
+				}
+				else if (random_zomb >= 20) {
+					zombie_dif = 3;
+					oleada.zombie_ataq -= 30;
+					oleada.tiempo += oleada.tiempo_oleada * .1 * mult_dificult;
+				}
+				zomb_aparecido[fila_aparicion] = true;
+				generar_zombie(fila_aparicion, zombie_dif);
+				if (!(rand() % ((CAS_Y - cant_aparicion) * 2))) {
+					break;
+				}
 			}
 		}
 	}
@@ -2725,7 +3068,7 @@ void oleadas_zombie() {
 		oleada.dificultad++;
 		std::cout << "DIFICULTAD: " << oleada.dificultad << std::endl;
 		if (oleada.ritmo_nivel > FRAMES_INI/2) {
-			oleada.ritmo_nivel *= 0.9;
+			oleada.ritmo_nivel *= 0.85;
 		}
 		if (oleada.ritmo_nivel < FRAMES_INI/2) {
 			oleada.ritmo_nivel = FRAMES_INI/2;
@@ -2735,7 +3078,7 @@ void oleadas_zombie() {
 
 short animacion_zombie(Zombie& zomb) {
 	switch (zomb.id) {
-	case 0: case 1: case 2:
+	case 0: case 1: case 2: case 3:
 		if (zomb.comiendo) {
 			if (!pausa_total && zomb.estado != 2) {
 				if (zomb.animacion < 8 * LIM_F_ZOMB_COM - 1) zomb.animacion++;
@@ -2845,7 +3188,7 @@ bool funcion_particula(Particula& part) {
 			else {
 				part.ant_part->sig_part = NULL;
 			}
-			cant_particulas--;
+			cant_particulas[part.fila]--;
 			delete& part;
 			return true;
 		}
@@ -2853,10 +3196,10 @@ bool funcion_particula(Particula& part) {
 	return false;
 }
 
-void generar_particula(short x, short y, short id, bool dir) {
+void generar_particula(short x, short y, short id, bool dir, short fila) {
 	Particula* nueva_part = NULL, * ant_part = NULL;
-	nueva_part = ant_part = particulas;
-	for (int i{}; i < cant_particulas; i++) {
+	nueva_part = ant_part = particulas[fila];
+	for (int i{}; i < cant_particulas[fila]; i++) {
 		nueva_part = nueva_part->sig_part;
 	}
 	std::cout << "Y: " << y << std::endl;
@@ -2874,6 +3217,7 @@ void generar_particula(short x, short y, short id, bool dir) {
 
 	//Inicializar nueva partícula
 	nueva_part->id = id;
+	nueva_part->fila = fila;
 	switch (id) {
 	case 0://Cabeza
 		nueva_part->estado = 0;
@@ -2929,9 +3273,18 @@ void generar_particula(short x, short y, short id, bool dir) {
 		nueva_part->tiemp = 0;
 		nueva_part->y = y + 34;
 		break;
+	case 8://Ladrillo
+		nueva_part->estado = 0;
+		nueva_part->impulso = rand() % 20 + 20;
+		nueva_part->mov_x = nueva_part->impulso / 3;
+		nueva_part->x = x + 44 - nueva_part->mov_x;
+		nueva_part->angulo = rand() % 360;
+		nueva_part->tiemp = 0;
+		nueva_part->y = y - 18 + nueva_part->impulso;
+		break;
 	}
 	nueva_part->dir = dir;
-	cant_particulas++;
+	cant_particulas[fila]++;
 }
 
 void rotacion_particula_x(Particula& part) {
@@ -2950,7 +3303,7 @@ void rotacion_particula_x(Particula& part) {
 		part.angulo += part.impulso * dir / 8;
 		part.impulso--;
 		break;
-	case 5: case 6: case 7:
+	case 5: case 6: case 7: case 8:
 		part.angulo += part.impulso * dir / 12;
 		part.impulso--;
 		break;
@@ -2968,12 +3321,13 @@ float animacion_cabeza_part(Particula& part) {
 	short dir = part.dir ? 1 : -1;
 	if (!part.estado && !pausa_total) {
 		//La partícula es una cabeza
-		if (part.id != 5 && part.id != 6) {
+		switch (part.id) {
+		default:
 			part.angulo += (part.impulso * dir - 18) / 3;
-		}
-		//La partícula es un brazo
-		else {
+			break;
+		case 5: case 6: case 8:
 			part.angulo += (part.impulso * dir - 8) / 5;
+			break;
 		}
 	}
 	//Derecha
@@ -3040,6 +3394,48 @@ bool funcion_efecto(Efectos_esp& eff) {
 			eff.pant.tiemp++;
 		}
 		break;
+	case 3: //Explosión petacereza
+		if (eff.expl.tiemp > 11) {
+			eliminar = true;
+			break;
+		}
+		if (!eliminar) {
+			short temblor_y = pausa_total ? 2 : rand() % 6;
+			short temblor_x = pausa_total ? 2 : rand() % 6;
+			short trans = eff.expl.tiemp > 10 ? 255 - (eff.expl.tiemp - 10) * 100 : 255;
+			al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.explosion, eff.expl.tiemp * 300, 0, 300, 300, NORM_C, 150, 150, eff.expl.x + 150, eff.expl.y + 150, 1, 1, float(eff.expl.aleatorio) * 0.0175, eff.expl.aleatorio % 2);
+			al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, M_TRANS_C(trans), 2100, 300, 300, 200, eff.expl.x - 2 + temblor_x, eff.expl.y + 48 + temblor_y, 0);
+			if (!pausa_total) {
+				if (!(frames % (LIM_F_EXPLO))) eff.expl.tiemp++;
+			}
+		}
+		break;
+	case 4: //Explosión petaseta
+		if (eff.expl.tiemp > 29) {
+			eliminar = true;
+			break;
+		}
+		if (!eliminar) {
+			float tamanio = 1;
+			short temblor_y = pausa_total ? 2 : rand() % 6;
+			short temblor_x = pausa_total ? 2 : rand() % 6;
+			short anim = eff.expl.tiemp > 3 ? int((eff.expl.tiemp - 3) / 2) : -1;
+			short trans = eff.expl.tiemp > 25 ? 255 - (eff.expl.tiemp - 25) * 60 : 255;
+			if (anim > 11) {
+				anim = 11;
+			}
+			else if (anim < 0) {
+				tamanio = .4 + eff.expl.tiemp * .2;
+				anim = 0;
+			}
+			anim *= 300;
+			al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.explosion, anim, 700, 300, 300, M_TRANS_C(trans), 0, 0, eff.expl.x + 150.0 * (1.0 - tamanio), eff.expl.y + 270.0 * (1.0 - tamanio), tamanio, tamanio, 0, eff.expl.aleatorio);
+			al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.explosion, 2400, 300, 300, 200, M_TRANS_C(trans), 0, 0, eff.expl.x - 2 + temblor_x + 150.0 * (1.0 - tamanio), eff.expl.y + 48 + temblor_y + 320.0 * (1.0 - tamanio), tamanio, tamanio, 0, 0);
+			if (!pausa_total) {
+				if (!(frames % (LIM_F_EXPLO))) eff.expl.tiemp++;
+			}
+		}
+		break;
 	}
 	if (eliminar) {
 		eff.ant->sig = eff.sig;
@@ -3055,7 +3451,7 @@ bool funcion_efecto(Efectos_esp& eff) {
 
 void vfx_pantalla(short r, short g, short b, float transp, short tiemp_max) {
 	Efectos_esp* eff{ NULL };
-	eff = generar_efecto();
+	eff = generar_efecto_fin();
 	eff->tipo = 2;
 
 	eff->pant.r = r;
@@ -3068,7 +3464,7 @@ void vfx_pantalla(short r, short g, short b, float transp, short tiemp_max) {
 
 void vfx_destello(short r, short g, short b, float transp, short tiemp_max) {
 	Efectos_esp* eff{ NULL };
-	eff = generar_efecto();
+	eff = generar_efecto_fin();
 	eff->tipo = 1;
 
 	eff->pant.r = r;
@@ -3079,7 +3475,29 @@ void vfx_destello(short r, short g, short b, float transp, short tiemp_max) {
 	eff->pant.transp = transp;
 }
 
-Efectos_esp* generar_efecto() {
+void vfx_explosion_petacereza(short x, short y) {
+	Efectos_esp* eff{ NULL };
+	eff = generar_efecto_ini();
+	eff->tipo = 3;
+
+	eff->expl.x = x;
+	eff->expl.y = y;
+	eff->expl.tiemp = 0;
+	eff->expl.aleatorio = rand() % 360;
+}
+
+void vfx_explosion_petaseta(short x, short y) {
+	Efectos_esp* eff{ NULL };
+	eff = generar_efecto_ini();
+	eff->tipo = 4;
+
+	eff->expl.x = x;
+	eff->expl.y = y;
+	eff->expl.tiemp = 0;
+	eff->expl.aleatorio = rand() % 2;
+}
+
+Efectos_esp* generar_efecto_fin() {
 	Efectos_esp* fin{ NULL }, * nuevo_vfx{ NULL };
 	fin = vfx;
 	while (fin->sig) {
@@ -3089,6 +3507,23 @@ Efectos_esp* generar_efecto() {
 	fin->sig = nuevo_vfx;
 	nuevo_vfx->ant = fin;
 	nuevo_vfx->sig = NULL;
+
+	std::cout << "NUEVO EFFECTO: " << nuevo_vfx << std::endl;
+
+	return nuevo_vfx;
+}
+
+Efectos_esp* generar_efecto_ini() {
+	Efectos_esp* nuevo_vfx{ NULL };
+	nuevo_vfx = new Efectos_esp;
+
+	nuevo_vfx->sig = vfx->sig;
+	nuevo_vfx->ant = vfx;
+
+	if (vfx->sig) {
+		vfx->sig->ant = nuevo_vfx;
+	}
+	vfx->sig = nuevo_vfx;
 
 	std::cout << "NUEVO EFFECTO: " << nuevo_vfx << std::endl;
 
@@ -3105,6 +3540,19 @@ void funcion_semillero() {
 	}
 }
 
+void cambiar_pantalla_ventana() {
+	ALLEGRO_MONITOR_INFO resol_pant;
+	al_get_monitor_info(0, &resol_pant);
+	resol_x = resol_pant.x2 - resol_pant.x1;
+	resol_y = resol_pant.y2 - resol_pant.y1;
+
+	resol_x *= .6;
+	resol_y *= .6;
+
+	tam_pant_x = float(resol_x) / RESOL_X;
+	tam_pant_y = float(resol_y) / RESOL_Y;
+}
+
 void cambiar_pantalla_completa() {
 	ALLEGRO_MONITOR_INFO resol_pant;
 	pantalla_completa = !pantalla_completa;
@@ -3116,12 +3564,45 @@ void cambiar_pantalla_completa() {
 		tam_pant_y = float(resol_y) / RESOL_Y;
 	}
 	else {
-		resol_x = RESOL_X;
-		resol_y = RESOL_Y;
-		tam_pant_x = 1;
-		tam_pant_y = 1;
+		cambiar_pantalla_ventana();
 	}
 	al_set_display_flag((ALLEGRO_DISPLAY*)b.al.display, ALLEGRO_FULLSCREEN_WINDOW, pantalla_completa);
+}
+
+void reescalar_pantalla() {
+	//Dibujar transición cerrar juego
+	if (mouse.tiemp_esc > 0) {
+		float mult_ec = (float(RESOL_Y) / (2 * TIEMPO_ESC)) * -1;
+		float apagado = float(mouse.tiemp_esc) / TIEMPO_ESC;
+		float corte_y = (sqrt(pow(TIEMPO_ESC, 2) - pow(mouse.tiemp_esc, 2)) + TIEMPO_ESC) * mult_ec + RESOL_Y;
+		corte_y *= 1.6;
+		if (corte_y > RESOL_Y / 2) {
+			corte_y = RESOL_Y / 2;
+		}
+		dibujar_texto((char*)"CERRANDO JUEGO", RESOL_X / 2 - 150, RESOL_Y / 2 - 15, M_TRANS_C(256 * apagado));
+
+		al_set_target_backbuffer((ALLEGRO_DISPLAY*)b.al.display);
+		al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.fondo_plantas, 0, 0, RESOL_X * 2, RESOL_Y * 2, M_TRANS_C(256 * apagado), 0, 0, -resol_x + int(mouse.tiemp_esc * mult_ec * -1.5) % resol_x, -resol_y + int(mouse.tiemp_esc * mult_ec * -1.5) % resol_y, tam_pant_x, tam_pant_y, 0, 0);
+
+		//Dibujar reesclado
+		al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.al.buffer, 0, corte_y, RESOL_X, RESOL_Y - corte_y * 2, M_TRANS_C(128 * (1.0 - apagado) + 128), 0, 0, 0, corte_y * tam_pant_y, tam_pant_x, tam_pant_y, 0, 0);
+	}
+	//Dibujar pantalla
+	else {
+		//Dibujar reesclado
+		al_set_target_backbuffer((ALLEGRO_DISPLAY*)b.al.display);
+		al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.al.buffer, 0, 0, RESOL_X, RESOL_Y, NORM_C, 0, 0, 0, 0, tam_pant_x, tam_pant_y, 0, 0);
+	}
+}
+
+void finalizar_ejecucion() {
+	if (mouse.tiemp_esc > 0) {
+		mouse.tiemp_esc++;
+		if (mouse.tiemp_esc >= TIEMPO_ESC) {
+			bucle = false;
+			programa_corriendo = false;
+		}
+	}
 }
 
 /*----------OPERACIONES-JUEGO---------------------------------------------------------------------------------------------*/
@@ -3145,6 +3626,7 @@ void inicializar_selector() {
 	pos_semillero = 0;
 	for (int i{}; i < LIM_SEM; i++) {
 		semillero[i].plant = -2;
+		semillero[i].recarga = 0;
 		semillero[i].aleat = false;
 	}
 
@@ -3155,7 +3637,7 @@ void inicializar_selector() {
 	b.selector_hud = al_load_bitmap("Sprites/Extra/Seed_selection_hud.png");
 	b.fondo_casa_dia = al_load_bitmap("Sprites/Daylight_Playground.png");
 	b.fondo_casa_noche = al_load_bitmap("Sprites/Nighttime_Playground.png");
-	b.pala_interfaz = al_load_bitmap("Sprites/Extra/Shovel_Hud.png");
+	b.hud_juego_bitmap = al_load_bitmap("Sprites/Extra/Game_Hud_Bitmap.png");
 	b.sol_bitmap = al_load_bitmap("Sprites/Extra/Sun_Bitmap.png");
 	b.texto_inicio_part = al_load_bitmap("Sprites/Extra/Start_Text_Bitmap.png");
 
@@ -3166,13 +3648,16 @@ void finalizar_selector() {
 	for (int i{ pos_semillero }; i < LIM_SEM; i++) {
 		semillero[i].aleat = true;
 		semillero[i].plant = rand() % 8 + 1;
+		if (i == 0) {
+			semillero[i].plant = 2;
+		}
 	}
 
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.selector_hud);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.semillero_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_dia);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_noche);
-	al_destroy_bitmap((ALLEGRO_BITMAP*)b.pala_interfaz);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.hud_juego_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.sol_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.texto_inicio_part);
 }
@@ -3186,11 +3671,13 @@ void inicializar_juego() {
 	cant_sol_tablero = 0;
 
 	//Inicializar partículas
-	particulas = new Particula;
-	particulas->ant_part = NULL;
-	particulas->sig_part = NULL;
-	particulas->id = -1;
-	cant_particulas = 0;
+	for (int i{}; i < CAS_Y; i++) {
+		particulas[i] = new Particula;
+		particulas[i]->ant_part = NULL;
+		particulas[i]->sig_part = NULL;
+		particulas[i]->id = -1;
+		cant_particulas[i] = 0;
+	}
 
 	//Inicializar Proyectiles
 	for (int i{}; i < CAS_Y; i++) {
@@ -3247,12 +3734,19 @@ void inicializar_juego() {
 	semillero_elegido = -2;
 	planta_elegida = -2;
 
+	pausa_total = false;
+	fin_juego = false;
+	mouse.opc_sel = OPC_NULL;
+
+	b.sombra_buffer = al_create_bitmap(RESOL_X, RESOL_Y);
+	b.objetos_buffer = al_create_bitmap(RESOL_X, RESOL_Y);
+
 	b.plantas_dia = al_load_bitmap("Sprites/Plants/Plants_Daytime.png");
 	b.plantas_noche = al_load_bitmap("Sprites/Plants/Plants_Nighttime.png");
 	b.chomper_anim = al_load_bitmap("Sprites/Plants/Chomper_Bite.png");
 	b.semillero_bitmap = al_load_bitmap("Sprites/Extra/Seedpackets_Bitmap.png");
-	b.pala_cursor = al_load_bitmap("Sprites/Plants/Shovel.png");
-	b.pala_interfaz = al_load_bitmap("Sprites/Extra/Shovel_Hud.png");
+	b.hud_juego_bitmap = al_load_bitmap("Sprites/Extra/Game_Hud_Bitmap.png");
+	b.hud_pausa_bitmap = al_load_bitmap("Sprites/Extra/Pause_Hud_Bitmap.png");
 	b.sol_bitmap = al_load_bitmap("Sprites/Extra/Sun_Bitmap.png");
 	b.explosion = al_load_bitmap("Sprites/Extra/Explosion_Bitmap.png");
 	b.guisante = al_load_bitmap("Sprites/Bullets/Bullet_Pea.png");
@@ -3261,8 +3755,10 @@ void inicializar_juego() {
 	b.fondo_casa_noche = al_load_bitmap("Sprites/Nighttime_Playground.png");
 	b.enfoque_oscuro = al_load_bitmap("Sprites/Focus_Screen.png");
 	b.texto_inicio_part = al_load_bitmap("Sprites/Extra/Start_Text_Bitmap.png");
-	b.fondo_plantas = al_load_bitmap("Sprites/Plants_Background.png");
 	b.pantalla_blanca = al_load_bitmap("Sprites/Extra/White_Screen.png");
+	b.hipno_fondo = al_load_bitmap("Sprites/Extra/Psychedelic_Screen.png");
+
+	b.al.hud_buffer = al_create_bitmap(RESOL_X, RESOL_Y);
 
 	bucle = true;
 }
@@ -3286,13 +3782,15 @@ void finalizar_juego() {
 
 	std::cout << "ELIMINACION DE PARTÍCULAS:" << std::endl;
 	if (cant_particulas) {
-		Particula* elim_part = NULL, * sig_elim_part = NULL;
-		elim_part = particulas;
-		for (int i{}; i < cant_particulas; i++) {
-			sig_elim_part = elim_part->sig_part;
-			delete elim_part;
-			std::cout << "POSICION " << i << " ELIMINADA" << std::endl;
-			elim_part = sig_elim_part;
+		for (int y{}; y < CAS_Y; y++) {
+			Particula* elim_part = NULL, * sig_elim_part = NULL;
+			elim_part = particulas[y];
+			for (int i{}; i < cant_particulas[y]; i++) {
+				sig_elim_part = elim_part->sig_part;
+				delete elim_part;
+				std::cout << "POSICION " << i << " ELIMINADA" << std::endl;
+				elim_part = sig_elim_part;
+			}
 		}
 	}
 	else {
@@ -3336,28 +3834,33 @@ void finalizar_juego() {
 		}
 	}
 
+	guardar.tiempo = frames;
+
 	frames = 0;
+
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.sombra_buffer);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.objetos_buffer);
 
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_dia);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.chomper_anim);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.plantas_dia);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_noche);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.semillero_bitmap);
-	al_destroy_bitmap((ALLEGRO_BITMAP*)b.pala_interfaz);
-	al_destroy_bitmap((ALLEGRO_BITMAP*)b.pala_cursor);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.hud_juego_bitmap);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.hud_pausa_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.sol_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.explosion);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.guisante);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.zombie_bitmap);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.enfoque_oscuro);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.texto_inicio_part);
-	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_plantas);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.hipno_fondo);
+	al_destroy_bitmap((ALLEGRO_BITMAP*)b.al.hud_buffer);
 }
 
 void inicializar_fin_juego() {
 	b.enfoque_oscuro = al_load_bitmap("Sprites/Focus_Screen.png");
 	b.texto_inicio_part = al_load_bitmap("Sprites/Extra/Start_Text_Bitmap.png");
-	b.fondo_plantas = al_load_bitmap("Sprites/Plants_Background.png");
 	al_set_display_icon((ALLEGRO_DISPLAY*)b.al.display, al_load_bitmap("Sprites/Icon_OG.png"));
 
 	cargar_record();
@@ -3373,14 +3876,16 @@ void inicializar_fin_juego() {
 void finalizar_fin_juego() {
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.enfoque_oscuro);
 	al_destroy_bitmap((ALLEGRO_BITMAP*)b.texto_inicio_part);
-	al_destroy_bitmap((ALLEGRO_BITMAP*)b.fondo_plantas);
 	al_set_display_icon((ALLEGRO_DISPLAY*)b.al.display, al_load_bitmap("Sprites/Icon.png"));
 
 	//Guardar record
-	guardar.tiempo = frames / 60;
 	guardar.puntos = oleada.puntos;
 	guardar_record(guardar);
 	delete[] tabla;
+
+	oleada.puntos = 0;
+	fin_juego = false;
+	pausa_total = false;
 
 	frames = 0;
 }
@@ -3495,10 +4000,73 @@ void dibujar_texto(char* text, short x, short y, ALLEGRO_COLOR color) {
 }
 
 void dibujar_record(float x, float y) {
+	const int ESP_TIEMP{ 360 };
 	for (int i{ 0 }; i < CANT_REC; i++) {
 		dibujar_numero(tabla[i].puntos, x, y + 50 * i, NORM_C);
-		dibujar_texto(tabla[i].nombre, x + 210, y + 50 * i, NORM_C);
+		dibujar_texto(tabla[i].nombre, x + 185, y + 50 * i, NORM_C);
+		dibujar_numero((tabla[i].tiempo / 60) % 60, x + ESP_TIEMP + 56, y + 50 * i, NORM_C);
+		dibujar_numero(tabla[i].tiempo / 3600, x + ESP_TIEMP, y + 50 * i, NORM_C);
+		dibujar_texto((char*)".", x + ESP_TIEMP + 24, y + 50 * i, NORM_C);
+		dibujar_texto((char*)".", x + ESP_TIEMP + 24, y + 50 * i - 15, NORM_C);
 	}
+}
+
+void dibujo_planta_sombra(Planta& plant, short x, short y) {
+	float tam{ 1.0 };
+	short off_x = 195 + plant.dx;
+	short off_y = 178 + plant.dy;
+
+	//Recolocar sombra
+	switch (plant.pos) {
+	case 2: //Girasol
+		off_y += 4;
+		break;
+	case 4: //Nuez
+		off_y -= 2;
+		break;
+	case 7: //Carroñívora
+		off_x -= 9;
+		off_y += 1;
+		break;
+	case 9: //Desesporada
+		off_x -= 9;
+		off_y -= 1;
+		tam = 0.9;
+		break;
+	case 10: //S. Solar
+		if (plant.estado <= 1) {
+			off_x -= 2;
+			off_y += 2;
+			tam = 0.7;
+		}
+		else {
+			off_x -= 1;
+			off_y -= 5;
+			tam = 1.15;
+		}
+		break;
+	case 11: //Humoseta
+		off_x -= 2;
+		off_y -= 4;
+		break;
+	case 13: //Hipnoseta
+		off_y += 2;
+		break;
+	case 14: //Miédica
+		off_x -= 1;
+		off_y += 6;
+		tam = 0.7;
+		break;
+	case 16: //Petaseta
+		off_y += 4;
+		break;
+	case 5: case 12:
+		return;
+	}
+
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.sombra_buffer);
+	al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, 0, 1350, 90, 90, NORM_C, 0, 0, x * 100 + off_x + 45 * (1.0 - tam), y * 100 + off_y + 45 * (1.0 - tam), tam, tam, 0, 0);
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.objetos_buffer);
 }
 
 void dibujar_titulo() {
@@ -3561,10 +4129,10 @@ void dibujar_titulo() {
 				tr.y_global = 0;
 			}
 		}
-		marcador_y = 155 + tr.y_global + extra;
-		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.notas_bitmap, 0, 0, 660, 565, 82, marcador_y - 82, 0);
-		dibujar_texto((char*)"puntuaci'on   nombre", 190, marcador_y + 85, NORM_C);
-		dibujar_record(300, marcador_y + 145);
+		marcador_y = 190 + tr.y_global + extra;
+		al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.notas_bitmap, 0, 0, 849, 640, NORM_C, 0, 0, 49, marcador_y - 122, .92, .92, 0, 0);
+		dibujar_texto((char*)"puntuaci'on  nombre  tiempo", 130, marcador_y + 85, NORM_C);
+		dibujar_record(240, marcador_y + 145);
 	}
 
 	//Animación arbustos
@@ -3591,9 +4159,7 @@ void dibujar_titulo() {
 	}
 	dibujar_cursor();
 
-	//Dibujar reesclado
-	al_set_target_backbuffer((ALLEGRO_DISPLAY*)b.al.display);
-	al_draw_scaled_rotated_bitmap((ALLEGRO_BITMAP*)b.al.buffer, 0, 0, 0, 0, tam_pant_x, tam_pant_y, 0, 0);
+	reescalar_pantalla();
 
 	al_flip_display();
 }
@@ -3640,15 +4206,22 @@ void dibujar_selector() {
 		//Suelto
 		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, 0, 280, 220, 130, 45 + mov_x, 445, 0);
 	}
+
 	//Botón Reiniciar selección
-	if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575 && mouse.estado == 2) {
-		//Presionado
-		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, 220, 410, 220, 130, 270 + mov_x, 445, 0);
+	if (pos_semillero > 0) {
+		if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575 && mouse.estado == 2) {
+			//Presionado
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, 220, 410, 220, 130, 270 + mov_x, 445, 0);
+		}
+		else {
+			//Suelto
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, 220, 280, 220, 130, 270 + mov_x, 445, 0);
+		}
 	}
 	else {
-		//Suelto
-		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, 220, 280, 220, 130, 270 + mov_x, 445, 0);
+		al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, M_NORM_C(102), 220, 280, 220, 130, 270 + mov_x, 445, 0);
 	}
+
 	//Botón Aleatorio
 	if (mouse.x >= 495 && mouse.x < 620 && mouse.y >= 445 && mouse.y < 575 && mouse.estado == 2) {
 		//Presionado
@@ -3658,6 +4231,7 @@ void dibujar_selector() {
 		//Suelto
 		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.selector_hud, 440, 280, 125, 130, 495 + mov_x, 445, 0);
 	}
+
 	//Botón Día Noche
 	if (mouse.x >= 630 && mouse.x < 755 && mouse.y >= 445 && mouse.y < 575 && mouse.estado == 2) {
 		//Presionado
@@ -3799,15 +4373,30 @@ void dibujar_selector() {
 				soles_guard_suma--;
 			}
 			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.sol_bitmap, 0, 0, 130, 130, 10, -(int)tr.juego_ini.hud_y * 1.18, 0);
-			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.pala_interfaz, 0, 0, 110, 110, LIM_SEM * 110 + 150, -(int)tr.juego_ini.hud_y, 0);
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 0, 0, 110, 110, LIM_SEM * 110 + 150, -(int)tr.juego_ini.hud_y, 0);
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 0, 110, 110, 110, RESOL_X - 110, -(int)tr.juego_ini.hud_y, 0);
 			dibujar_numero(soles_guard - soles_guard_suma, 70, 90 - (int)tr.juego_ini.hud_y * 1.18, NORM_C);
 
+			//Dibujar puntuación
 			dibujar_texto((char*)"Puntuaci'on", 5, RESOL_Y - 85 + (int)tr.juego_ini.hud_y, NORM_C);
 			dibujar_numero(oleada.puntos - oleada.puntos_sum, 110, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
 
+			//Dibujar cronómetro
 			dibujar_texto((char*)"Tiempo", RESOL_X - 160, RESOL_Y - 85 + (int)tr.juego_ini.hud_y, NORM_C);
-			dibujar_numero((frames / 60) % 60, RESOL_X - 63, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
-			dibujar_numero(frames / 3600, RESOL_X - 119, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
+			if ((frames / 60) % 60 >= 10) {	//Dibujar decenas
+				dibujar_numero((frames / 60) % 60, RESOL_X - 60, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
+			}
+			else {	//Dibujar unidades
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 0, 0, 30, 30, RESOL_X - 80, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, 0);
+				dibujar_numero((frames / 60) % 60, RESOL_X - 48, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
+			}
+			if (int(frames / 3600) >= 10) {	//Dibujar decenas
+				dibujar_numero((frames / 3600), RESOL_X - 123, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
+			}
+			else {	//Dibujar unidades
+				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 0, 0, 30, 30, RESOL_X - 143, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, 0);
+				dibujar_numero((frames / 3600), RESOL_X - 111, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
+			}
 			dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 50 + (int)tr.juego_ini.hud_y, NORM_C);
 			dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 65 + (int)tr.juego_ini.hud_y, NORM_C);
 
@@ -3831,8 +4420,7 @@ void dibujar_selector() {
 	dibujar_cursor();
 
 	//Dibujar reesclado
-	al_set_target_backbuffer((ALLEGRO_DISPLAY*)b.al.display);
-	al_draw_scaled_rotated_bitmap((ALLEGRO_BITMAP*)b.al.buffer, 0, 0, 0, 0, tam_pant_x, tam_pant_y, 0, 0);
+	reescalar_pantalla();
 
 	al_flip_display();
 }
@@ -3841,18 +4429,29 @@ void dibujar_tablero() {
 	ALLEGRO_COLOR color_aux;
 	short sobre_dibujo{ 0 };
 	bool enseniar_cursor{ true };
-	al_set_target_bitmap((ALLEGRO_BITMAP*)b.al.buffer);
 
-	switch (tipo_patio) {
-	case 0:	al_draw_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_dia, 0, 0, 0);	break;
-	case 1:	al_draw_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_noche, 0, 0, 0);	break;
-	}
+	//Iniciar Buffers vacíos
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.sombra_buffer);
+	al_clear_to_color(M_TRANS_C(0));
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.objetos_buffer);
+	al_clear_to_color(M_TRANS_C(0));
 
-	//Dibujar partículas
-	if (cant_particulas) {
+	//Dibujar plantas, proyectiles y zombies en el tablero
+	for (int y{}; y < CAS_Y; y++) {
+		Proyectil* ptr_proy = NULL, * ant_proy = NULL;
 		Particula* ptr_part{ NULL }, * ant_part{ NULL };
-		ptr_part = particulas;
-		for (int i{}; i < cant_particulas; i++) {
+		Zombie* ptr_zomb = NULL;
+
+		//Dibujar cráter
+		for (int x{ 0 }; x < CAS_X; x++) {
+			if (planta[x][y].pos == -2) {
+				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, NORM_C, 630, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+			}
+		}
+
+		//Dibujar partículas
+		ptr_part = particulas[y];
+		for (int i{}; i < cant_particulas[y]; i++) {
 			float pos_y{ 0 };
 			ant_part = ptr_part;
 			ptr_part = ptr_part->sig_part;
@@ -3902,41 +4501,84 @@ void dibujar_tablero() {
 			case 7://Corbata
 				al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, 367, 968, 12, 28, color_aux, 6, 14, ptr_part->x + ptr_part->mov_x + 6, pos_y + 14, 1, 1, ptr_part->angulo * .01745, 0);
 				break;
+			case 8://Ladrillo
+				al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, 490, 975, 35, 32, color_aux, 6, 14, ptr_part->x + ptr_part->mov_x + 6, pos_y + 14, 1, 1, ptr_part->angulo * .01745, 0);
+				break;
 			}
 		}
-	}
-
-	//Dibujar plantas, proyectiles y zombies en el tablero
-	for (int y{}; y < CAS_Y; y++) {
-		Proyectil* ptr_proy = NULL, * ant_proy = NULL;
-		Zombie* ptr_zomb = NULL;
 
 		//Dibujar plantas
 		for (int x{}; x < CAS_X; x++) {
-			if (planta[x][y].pos) {
+			if (planta[x][y].pos > 0) {
 				char color = planta[x][y].anim_danio > 0 ? 255 - planta[x][y].anim_danio * 7 : 255;
+				short off_x = 195 + planta[x][y].dx;
+				short off_y = 165 + planta[x][y].dy;
+				
+				dibujo_planta_sombra(planta[x][y], x, y);
+
 				switch (planta[x][y].pos) {
 				case 10://Seta solar
 					if (planta[x][y].estado > 2) {
-						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 720, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 720, animacion_planta(x, y, false), 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
 					}
 					else {
-						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 90, animacion_planta(x, y, false), 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
 					}
 					break;
 
 				case 12://Calabaza
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 270, animacion_planta(x, y, true), 90, 90, x * 100 + 195, y * 100 + 165, 0);
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 270, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 270, animacion_planta(x, y, true), 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 270, animacion_planta(x, y, false), 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
+					break;
+
+				case 13://Hipnoseta
+					if (true) {	//if true usado para declaración de variables locales
+						ALLEGRO_BITMAP* hipno_effect = al_create_bitmap(90, 90);		//BUSCAR UNA SOLUCIÓN PARA ESTA MEXICANADA
+						float sx, sy;
+						short corte_y = animacion_planta(x, y, false);
+						short grados = pow(corte_y / 90 - 1, 1.25) * -1;
+						sx = float((frames + planta[x][y].tiemp) % 800) / 4;
+						sy = float(frames % 800) / 4;
+
+						//Generar efecto hípnoseta
+						al_set_target_bitmap(hipno_effect);
+						al_clear_to_color(M_TRANS_C(0));
+						al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hipno_fondo, sx, sy, 90, 90, 0, 0, 0);
+
+						//Caso imagen no abarca todo el bitmap
+						if (sx > 110) {
+							al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hipno_fondo, 0, sy, 90, 90, 200 - sx, 0, 0);
+						}
+						if (sy > 110) {
+							al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hipno_fondo, sx, 0, 90, 90, 0, 200 - sy, 0);
+						}
+						if (sx > 110 && sy > 110) {
+							al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hipno_fondo, 0, 0, 90, 90, 200 - sx,  200 - sy, 0);
+						}
+						al_draw_bitmap(hipno_effect, 0, 0, (x + y) % 4);
+						al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, 360, 1350, 90, 90, M_TRANS_C(76), 0, 0, 0, 0, 1, 1, float(grados) * .01745, 0);
+
+						//Recortar efecto
+						al_set_blender(ALLEGRO_DEST_MINUS_SRC, ALLEGRO_ONE, ALLEGRO_INVERSE_ALPHA);
+						al_draw_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, 360, corte_y + 630, 90, 90, 0, 0, 0);
+						al_set_blender(ALLEGRO_ADD, ALLEGRO_ONE, ALLEGRO_INVERSE_ALPHA);
+
+						//Dibujar hipnoseta
+						al_set_target_bitmap((ALLEGRO_BITMAP*)b.al.buffer);
+						al_draw_tinted_bitmap(hipno_effect, al_map_rgb(255, color, color), x * 100 + off_x, y * 100 + off_y, 0);
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), 360, corte_y, 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
+
+						al_destroy_bitmap(hipno_effect);		//BUSCAR UNA SOLUCIÓN PARA ESTA MEXICANADA
+					}
 					break;
 
 				default://Cualquier otra planta
 					if (planta[x][y].pos >= 0 && planta[x][y].pos <= 8) {
-						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgb(255, color, color), (planta[x][y].pos - 1) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgb(255, color, color), (planta[x][y].pos - 1) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
 
 					}
 					else if (planta[x][y].pos >= 9 && planta[x][y].pos <= 16) {
-						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), (planta[x][y].pos - 9) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + 195, y * 100 + 165, 0);
+						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgb(255, color, color), (planta[x][y].pos - 9) * 90, animacion_planta(x, y, false), 90, 90, x * 100 + off_x, y * 100 + off_y, 0);
 					}
 					break;
 				}
@@ -3957,7 +4599,7 @@ void dibujar_tablero() {
 			short color{ 0 };
 			short color_r{ 255 }, color_g{ 255 }, color_b{ 255 };
 			short estado_zomb{ 0 };
-			float gorro_anim{ 0 };
+			float gorro_anim{ 0 }, gorro_danio{ 0 };
 
 			//Animación de daño
 			if (ptr_zomb->anim_danio > 0) {
@@ -4001,7 +4643,13 @@ void dibujar_tablero() {
 				mover_zombie(*ptr_zomb, y);
 			}
 
+			//Dibujar sombra
+			al_set_target_bitmap((ALLEGRO_BITMAP*)b.sombra_buffer);
+			al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, 0, 1350, 90, 90, NORM_C, 0, 0, ptr_zomb->x + 4, y * 100 + 177, 1.1, 1.1, 0, 0);
+			al_set_target_bitmap((ALLEGRO_BITMAP*)b.objetos_buffer);
+
 			//Se dibuja al zombie
+			//Zombie comiendo
 			if (ptr_zomb->comiendo) {
 				estado_zomb = estado_zomb == 135 ? 648 : 0;
 				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, color_aux, animacion_zombie(*ptr_zomb) + estado_zomb, 675, 108, 135, (int)ptr_zomb->x, y * 100 + 120, 0);
@@ -4029,15 +4677,32 @@ void dibujar_tablero() {
 						}
 						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, color_aux, (ptr_zomb->est_danio - 2) * 62 + 124, 945, 62, 62, (int)ptr_zomb->x + 15, y * 100 + gorro_anim * 3 + 111, 0);
 						break;
+					case 3://Ladrillo
+						gorro_anim = int(ptr_zomb->animacion / LIM_F_ZOMB_COM) * .4;
+						switch (int(ptr_zomb->animacion / LIM_F_ZOMB_COM) % 4) {
+						case 0:			gorro_anim = 0;		break;
+						case 1: case 3: gorro_anim = 0.6;	break;
+						case 2:			gorro_anim = 1.4;	break;
+						}
+						switch (ptr_zomb->est_danio) {
+						case 4: gorro_danio = 3; break;
+						case 5: gorro_danio = 2; break;
+						case 2: gorro_danio = 1; break;
+						case 3: gorro_danio = 0; break;
+						}
+						al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, gorro_danio * 80 + 976, 927, 80, 80, color_aux, 0, 0, (int)ptr_zomb->x + 11, y * 100 + gorro_anim * 3 + 115, .85, .85, 0, 0);
+						break;
 					}
 				}
 			}
+			//Zombie caminando
 			else {
 				switch (ptr_zomb->est_danio) {
 				default://Normal
 					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, color_aux, animacion_zombie(*ptr_zomb), estado_zomb, 108, 135, (int)ptr_zomb->x, y * 100 + 120, 0);
 					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, color_aux, animacion_zombie(*ptr_zomb), 270, 108, 67, (int)ptr_zomb->x, y * 100 + 120, 0);
 					break;
+				//Animaciones de muerte
 				case -1:
 					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, color_aux, animacion_zombie(*ptr_zomb), estado_zomb, 108, 135, (int)ptr_zomb->x, y * 100 + 120, 0);
 					break;
@@ -4076,6 +4741,20 @@ void dibujar_tablero() {
 						}
 						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, color_aux, (ptr_zomb->est_danio - 2) * 62 + 124, 945, 62, 62, (int)ptr_zomb->x + 15, y * 100 + gorro_anim * 3 + 105, 0);
 						break;
+					case 3://Ladrillo
+						gorro_anim = int(ptr_zomb->animacion / LIM_F_ZOMB) * .4;
+						if (gorro_anim >= 3) {
+							gorro_anim *= -1;
+							gorro_anim += 5.5;
+						}
+						switch (ptr_zomb->est_danio) {
+						case 4: gorro_danio = 3; break;
+						case 5: gorro_danio = 2; break;
+						case 2: gorro_danio = 1; break;
+						case 3: gorro_danio = 0; break;
+						}
+						al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.zombie_bitmap, gorro_danio * 80 + 976, 927, 80, 80, color_aux, 0, 0, (int)ptr_zomb->x + 11, y * 100 + gorro_anim * 3 + 108, .85, .85, 0, 0);
+						break;
 					}
 				}
 			}
@@ -4105,6 +4784,7 @@ void dibujar_tablero() {
 		for (int i{}; i < cant_proy[y]; i++) {
 			ant_proy = ptr_proy;
 			ptr_proy = ptr_proy->sig_proy;
+
 			if (mover_proyectil(*ptr_proy, y)) {
 				ptr_proy = ant_proy;
 				i--;
@@ -4116,13 +4796,13 @@ void dibujar_tablero() {
 				}
 				switch (ptr_proy->tipo) {
 				case -1: case -2://Guisantes
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28, ptr_proy->tipo * -28, 28, 28, ptr_proy->x, y * 100 + 189, 1);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28, ptr_proy->tipo * -28, 28, 28, ptr_proy->x, ptr_proy->y, 1);
 					break;
 				case -3://Espora desesporada
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28 + 112, 28, 28, 28, ptr_proy->x, y * 100 + 218, 1);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28 + 112, 28, 28, 28, ptr_proy->x, ptr_proy->y, 1);
 					break;
 				case -4://Espora Miédica
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28 + 112, 28, 28, 28, ptr_proy->x, y * 100 + 197, 1);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tiempo_ev * 28 + 112, 28, 28, 28, ptr_proy->x, ptr_proy->y, 1);
 					break;
 				}
 			}
@@ -4130,16 +4810,21 @@ void dibujar_tablero() {
 				short movimiento = pausa_total ? 0 : rand() % 3;
 				switch (ptr_proy->tipo) {
 				case 0: case 1://Guisantes
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, y * 100 + 189 + movimiento, 0);
+					//Sombra
+					al_set_target_bitmap((ALLEGRO_BITMAP*)b.sombra_buffer);
+					al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, 0, 1350, 90, 90, NORM_C, 0, 0, ptr_proy->x, ptr_proy->y + 32, 0.3, 0.3, 0, 0);
+					al_set_target_bitmap((ALLEGRO_BITMAP*)b.objetos_buffer);
+
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, ptr_proy->tipo * 28, 0, 28, 28, ptr_proy->x, ptr_proy->y + movimiento, 0);
 					break;
 				case 2://Esporas mini
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, 112 + int(int(ptr_proy->x) % 120 / 40) * 28, 0, 28, 28, ptr_proy->x, y * 100 + 218 + movimiento, 0);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, 112 + int(int(ptr_proy->x) % 120 / 40) * 28, 0, 28, 28, ptr_proy->x, ptr_proy->y + movimiento, 0);
 					break;
 				case 3://Esporas miédica
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, 112 + int(int(ptr_proy->x) % 120 / 40) * 28, 0, 28, 28, ptr_proy->x, y * 100 + 200 + movimiento, 0);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.guisante, 112 + int(int(ptr_proy->x) % 120 / 40) * 28, 0, 28, 28, ptr_proy->x, ptr_proy->y + movimiento, 0);
 					break;
 				case 4://Esporas Humoseta
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.explosion, ptr_proy->tiempo_ev * 200, 500, 200, 200, ptr_proy->x + ptr_proy->esp.trasl_x, y * 100 + 100, 0);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.explosion, ptr_proy->tiempo_ev * 200, 500, 200, 200, ptr_proy->x + ptr_proy->esp.trasl_x, ptr_proy->y, 0);
 					if (!(frames % 6) && !pausa_total) {
 						ptr_proy->tiempo_ev++;
 					}
@@ -4155,6 +4840,7 @@ void dibujar_tablero() {
 				if (planta[x][y].pos == 5 && planta[x][y].estado >= 3) {
 					short trans = planta[x][y].tiemp > 20 ? 255 - (planta[x][y].tiemp - 20) * 42 : 255;
 					color_aux = al_map_rgba(trans, trans, trans, trans);
+
 					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, (int(planta[x][y].animacion / LIM_F_EXPLO)) * 200, 300, 200, 200, x * 100 + 145, y * 100 + 75, 0);
 					if (planta[x][y].tiemp <= 12) {
 						short temblor_y = pausa_total ? 2 : rand() % 6;
@@ -4168,6 +4854,9 @@ void dibujar_tablero() {
 				//Mordida chomper
 				else if (planta[x][y].pos == 7 && (planta[x][y].estado == 1 || planta[x][y].estado == 2)) {
 					char color = planta[x][y].anim_danio > 0 ? 255 - planta[x][y].anim_danio * 7 : 255;
+					short off_x = x * 100 + 195 + planta[x][y].dx;
+					short off_y = y * 100 + 120 + planta[x][y].dy;
+
 					if (planta[x][y].estado == 2) {
 						unsigned char trans;
 						if (planta[x][y].animacion > 6 * LIM_F_PLANT) {
@@ -4183,25 +4872,7 @@ void dibujar_tablero() {
 						}
 						al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, al_map_rgba(trans * .7, trans * .5, trans, trans), 3200 + planta[x][y].tiemp % 2 * 200, 300, 200, 200, planta[x][y].esp.coord_zomb - 30, y * 100 + 90, planta[x][y].esp.coord_zomb % 2);
 					}
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.chomper_anim, al_map_rgb(255, color, color), animacion_planta(x, y, true), 0, 180, 135, x * 100 + 195, y * 100 + 120, 0);
-					sobre_dibujo++;
-				}
-			}
-		}
-	}
-
-	//Dibujar explosión petacereza
-	for (int y{ 0 }; y < CAS_Y && sobre_dibujo < anim_sobre_tablero; y++) {
-		for (int x{ 0 }; x < CAS_X && sobre_dibujo < anim_sobre_tablero; x++) {
-			if (planta[x][y].pos) {
-				//Explosión petacereza
-				if (planta[x][y].pos == 3 && planta[x][y].estado >= 1) {
-					short temblor_y = pausa_total ? 2 : rand() % 6;
-					short temblor_x = pausa_total ? 2 : rand() % 6;
-					short trans = planta[x][y].animacion > 10 ? 255 - (planta[x][y].animacion - 10) * 100 : 255;
-					color_aux = al_map_rgba(trans, trans, trans, trans);
-					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.explosion, planta[x][y].animacion * 300, 0, 300, 300, x * 100 + 95, y * 100 + 65, 0);
-					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.explosion, color_aux, 2100, 300, 300, 200, x * 100 + 93 + temblor_x, y * 100 + 113 + temblor_y, 0);
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.chomper_anim, al_map_rgb(255, color, color), animacion_planta(x, y, true), 0, 180, 135, off_x, off_y, 0);
 					sobre_dibujo++;
 				}
 			}
@@ -4275,14 +4946,7 @@ void dibujar_tablero() {
 						ptr_sol->y -= ptr_sol->estado.recol.mov_y / 30;
 					}
 				}
-				//Se calcula el tamaño que tendrá el halo de luz del sol
-				tamanio = (ptr_sol->tiemp + 8) % 24 >= 12 ? -(ptr_sol->tiemp + 8) % 12 - .0125 : (ptr_sol->tiemp + 8) % 12;
-				tamanio *= .0125;
-				//Si es negativo es que está decreciendo, caso contrario esta creciendo
-				if (tamanio < 0)
-					tamanio += .15;
-				tamanio *= ptr_sol->tam;
-				escala = ((float)ptr_sol->x + (float)ptr_sol->y) / (ptr_sol->estado.recol.mov_x + ptr_sol->estado.recol.mov_y) - .2 + tamanio;
+				escala = (((float)ptr_sol->x + (float)ptr_sol->y) / (ptr_sol->estado.recol.mov_x + ptr_sol->estado.recol.mov_y) - .2) * ptr_sol->tam;
 				al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.sol_bitmap, 130, 0, 80, 80, TRANS_C, 40, 40, ptr_sol->x + 40 * escala, ptr_sol->y + 40 * escala, escala, escala, (float)ptr_sol->angulo * .01745, 0);
 				al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.sol_bitmap, 210, 0, 80, 80, NORM_C, 0, 0, ptr_sol->x, ptr_sol->y, escala, escala, 0, 0);
 			}
@@ -4307,25 +4971,38 @@ void dibujar_tablero() {
 		}
 	}
 
-/*----------INTERFAZ------------------------------------------------------------------------------------------------------*/
-
 	//Dibujar efectos especiales
 	if (vfx->sig) {
-		Efectos_esp* act{ NULL }, *ant{ NULL };
+		Efectos_esp* act{ NULL }, * ant{ NULL };
 		ant = vfx;
 		act = vfx->sig;
 		while (act) {
 			if (funcion_efecto(*act)) {
 				act = ant;
-			}	
+			}
 			ant = act;
 			act = act->sig;
 		}
 	}
 
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.al.buffer);
+
+	switch (tipo_patio) {
+	case 0:	al_draw_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_dia, 0, 0, 0);		break;
+	case 1:	al_draw_bitmap((ALLEGRO_BITMAP*)b.fondo_casa_noche, 0, 0, 0);	break;
+	}
+
+	al_draw_tinted_bitmap((ALLEGRO_BITMAP*)b.sombra_buffer, M_TRANS_C(96), 0, 0, 0);
+	al_draw_bitmap((ALLEGRO_BITMAP*)b.objetos_buffer, 0, 0, 0);
+
+	/*----------INTERFAZ------------------------------------------------------------------------------------------------------*/
+
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.al.hud_buffer);
+	al_clear_to_color(M_TRANS_C(0));
+
 	//Dibuja la interfaz de pala
 	al_draw_bitmap_region((ALLEGRO_BITMAP*)b.sol_bitmap, 0, 0, 130, 130, 10, 0, 0);
-	al_draw_bitmap_region((ALLEGRO_BITMAP*)b.pala_interfaz, 0, 0, 110, 110, LIM_SEM * 110 + 150, 0, 0);
+	al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 0, 0, 110, 110, LIM_SEM * 110 + 150, 0, 0);
 
 	//Pintar la cantidad de soles de amarillo si se están sumando
 	color_aux = al_map_rgb(255, 255, 255);
@@ -4393,6 +5070,7 @@ void dibujar_tablero() {
 					}
 				}
 				dibujar_numero(costo_planta, i * 110 + 215, 74, color_costo);
+
 			}
 			else {
 				//Planta seleccionada
@@ -4426,23 +5104,84 @@ void dibujar_tablero() {
 		}
 	}
 
-	dibujar_texto((char*)"Puntuaci'on", 5, RESOL_Y - 85, NORM_C);
-	dibujar_numero(oleada.puntos - oleada.puntos_sum, 110, RESOL_Y - 50 , NORM_C);
-	if (oleada.puntos_sum > 0) {
-		oleada.puntos_sum -= oleada.puntos_sum/20 + 1;
-	}
-
-	dibujar_texto((char*)"Tiempo", RESOL_X - 160, RESOL_Y - 85, NORM_C);
-	dibujar_numero((frames / 60) % 60, RESOL_X - 63, RESOL_Y - 50, NORM_C);
-	dibujar_numero(frames / 3600, RESOL_X - 119, RESOL_Y - 50, NORM_C);
-	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 50, NORM_C);
-	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 65, NORM_C);
-
+	//Pausa
 	if (pausa_total && !fin_juego) {
+		//Dibujar fondo
 		short trasl_x = frames_indep % RESOL_X;
 		short trasl_y = frames_indep % RESOL_Y;
 		al_draw_tinted_bitmap((ALLEGRO_BITMAP*)b.fondo_plantas, TRANS_C, -RESOL_X + trasl_x, 0 - trasl_y, 0);
-		dibujar_texto((char*)"PAUSA", RESOL_X / 2 - 75, RESOL_Y / 2 - 15, NORM_C);
+
+		//Dibujar menú
+		al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, al_map_rgba(0, 0, 0, 140), 0, 0, 398, 487, 456, 130, 0);	//Sombra menú
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 0, 0, 398, 487, 441, 115, 0);									//Fondo menú
+
+		//BOTONES PAUSA
+		//Continuar
+		if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 && mouse.y >= 280 && mouse.y < 365 && mouse.estado == MOUSE_EST_CLICK) {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 400, 100, 202, 94, RESOL_X / 2 - 101, 275, 0);	//Botón CONTINUAR Presionado
+		}
+		else {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 400, 0, 202, 94, RESOL_X / 2 - 101, 275, 0);		//Botón CONTINUAR
+		}
+
+		//Reiniciar
+		if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 && mouse.y >= 375 && mouse.y < 460 && mouse.estado == MOUSE_EST_CLICK) {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 605, 100, 202, 94, RESOL_X / 2 - 101, 370, 0);	//Botón REINICIAR
+		}
+		else {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 605, 0, 202, 94, RESOL_X / 2 - 101, 370, 0);		//Botón REINICIAR
+		}
+
+		//Volumen
+		if (mouse.x >= RESOL_X / 2 - 105 && mouse.x < RESOL_X / 2 - 5 && mouse.y >= 460 && mouse.y < 555 && mouse.estado == MOUSE_EST_CLICK) {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 400, 300, 105, 100, RESOL_X / 2 - 105, 460, 0);	//Botón VOLUMEN
+		}
+		else {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 400, 200, 105, 100, RESOL_X / 2 - 105, 460, 0);	//Botón VOLUMEN
+		}
+
+		//Casa
+		if (mouse.x >= RESOL_X / 2 && mouse.x < RESOL_X / 2 + 100 && mouse.y >= 460 && mouse.y < 555 && mouse.estado == MOUSE_EST_CLICK) {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 505, 300, 105, 100, RESOL_X / 2, 460, 0);			//Botón CASA
+		}
+		else {
+			al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_pausa_bitmap, 505, 200, 105, 100, RESOL_X / 2, 460, 0);			//Botón CASA
+		}
+		dibujar_texto((char*)"PAUSA", RESOL_X / 2 - 55, 55, NORM_C);
+	}
+
+	//Dibujar puntuación actual
+	dibujar_texto((char*)"Puntuaci'on", 5, RESOL_Y - 85, NORM_C);
+	dibujar_numero(oleada.puntos - oleada.puntos_sum, 110, RESOL_Y - 50, NORM_C);
+	if (oleada.puntos_sum > 0) {
+		oleada.puntos_sum -= oleada.puntos_sum / 20 + 1;
+	}
+
+	//Dibujar cronómetro
+	dibujar_texto((char*)"Tiempo", RESOL_X - 160, RESOL_Y - 85, NORM_C);
+	if ((frames / 60) % 60 >= 10) {	//Dibujar decenas
+		dibujar_numero((frames / 60) % 60, RESOL_X - 60, RESOL_Y - 50, NORM_C);
+	}
+	else {	//Dibujar unidades
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 0, 0, 30, 30, RESOL_X - 80, RESOL_Y - 50, 0);
+		dibujar_numero((frames / 60) % 60, RESOL_X - 48, RESOL_Y - 50, NORM_C);
+	}
+	if (int(frames / 3600) >= 10) {	//Dibujar decenas
+		dibujar_numero((frames / 3600), RESOL_X - 123, RESOL_Y - 50, NORM_C);
+	}
+	else {	//Dibujar unidades
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 0, 0, 30, 30, RESOL_X - 143, RESOL_Y - 50, 0);
+		dibujar_numero((frames / 3600), RESOL_X - 111, RESOL_Y - 50, NORM_C);
+	}
+	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 50, NORM_C);
+	dibujar_texto((char*)".", RESOL_X - 95, RESOL_Y - 65, NORM_C);
+
+	//Dibujar Botón pausa
+	if (mouse.x >= RESOL_X - 110 && mouse.x < RESOL_X && mouse.y > 0 && mouse.y < 110 && mouse.estado == MOUSE_EST_CLICK) {
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 110, 110, 110, 110, RESOL_X - 110, 0, 0);
+	}
+	else {
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 0, 110, 110, 110, RESOL_X - 110, 0, 0);
 	}
 
 	if (enseniar_cursor && !fin_juego) {
@@ -4534,9 +5273,11 @@ void dibujar_tablero() {
 		al_draw_tinted_scaled_rotated_bitmap_region((ALLEGRO_BITMAP*)b.texto_inicio_part, 0, 1620, 1082, 540, color_aux, 541, 270, 621 + temblor_x, 350 + temblor_y + text_extra_y, tr.muerte.tam_letr, tr.muerte.tam_letr, 0, 0);
 	}
 
+	al_set_target_bitmap((ALLEGRO_BITMAP*)b.al.buffer);
+	al_draw_bitmap((ALLEGRO_BITMAP*)b.al.hud_buffer, 0, 0, 0);
+
 	//Dibujar reesclado
-	al_set_target_backbuffer((ALLEGRO_DISPLAY*)b.al.display);
-	al_draw_scaled_rotated_bitmap((ALLEGRO_BITMAP*)b.al.buffer, 0, 0, 0, 0, tam_pant_x, tam_pant_y, 0, 0);
+	reescalar_pantalla();
 
 	//Dibujar en ventana
 	al_flip_display();
@@ -4635,7 +5376,7 @@ void dibujar_fin_juego() {
 		dibujar_numero(oleada.puntos, pos_x + 670, 480, NORM_C);
 
 		dibujar_texto((char*)"Nombre", pos_x, 530, NORM_C);
-		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 240, 90, 30, 30, pos_x + 630 + indice_nombre % 3 * 22, 550, 0);
+		al_draw_bitmap_region((ALLEGRO_BITMAP*)b.fuente_bitmap, 180, 90, 30, 30, pos_x + 630 + indice_nombre % 3 * 22, 545, 0);
 		dibujar_texto((char*)guardar.nombre, pos_x + 630, 530, NORM_C);
 		dibujar_texto((char*)"Pulse ENTER para salir", pos_x, 580, NORM_C);
 
@@ -4654,8 +5395,7 @@ void dibujar_fin_juego() {
 	}
 
 	//Dibujar reesclado
-	al_set_target_backbuffer((ALLEGRO_DISPLAY*)b.al.display);
-	al_draw_scaled_rotated_bitmap((ALLEGRO_BITMAP*)b.al.buffer, 0, 0, 0, 0, tam_pant_x, tam_pant_y, 0, 0);
+	reescalar_pantalla();
 
 	//Dibujar en ventana
 	al_flip_display();
@@ -4669,58 +5409,90 @@ void dibujar_cursor() {
 	}
 	switch (pantalla) {
 	case 1://Selector
-		if (mouse.x >= 45 && mouse.x < 265 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
-			mouse.estado = 1;
-		}
-		else if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
-			mouse.estado = 1;
-		}
-		else if (mouse.x >= 495 && mouse.x < 620 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
-			mouse.estado = 1;
-		}
-		else if (mouse.x >= 630 && mouse.x < 755 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
-			mouse.estado = 1;
+		if (tr.id == -1) {
+			if (mouse.x >= 45 && mouse.x < 265 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
+				mouse.estado = 1;
+			}
+			else if (mouse.x >= 270 && mouse.x < 490 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
+				mouse.estado = 1;
+			}
+			else if (mouse.x >= 495 && mouse.x < 620 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
+				mouse.estado = 1;
+			}
+			else if (mouse.x >= 630 && mouse.x < 755 && mouse.y >= 445 && mouse.y < 575 && mouse.estado != 2) {
+				mouse.estado = 1;
+			}
 		}
 		break;
 	case 2://Juego
-		//Dibujar Planta elegida/ Pala
-		if (planta_elegida) {
-			if (planta_elegida >= 1 && planta_elegida <= 8) {
-				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgba(165, 165, 165, 200), (planta_elegida - 1) * 90, 0, 90, 90, mouse.x - 45, mouse.y - 45, 0);
-				return;
-			}
-			else if (planta_elegida >= 9 && planta_elegida <= 16) {
-				al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgba(165, 165, 165, 200), (planta_elegida - 9) * 90, 0, 90, 90, mouse.x - 45, mouse.y - 45, 0);
-				return;
-			}
-			else if (planta_elegida == -1) {
-				al_draw_bitmap_region((ALLEGRO_BITMAP*)b.pala_interfaz, 110, 0, 110, 110, LIM_SEM * 110 + 150, 0, 0);
-				al_draw_bitmap((ALLEGRO_BITMAP*)b.pala_cursor, mouse.x - 55, mouse.y - 55, 0);
-				return;
-			}
+		//Regresar mouse al estado original si estaba apuntando
+		if (mouse.estado != MOUSE_EST_CLICK) {
+			mouse.estado = MOUSE_EST_NORMAL;
 		}
-
-		if (mouse.y < 110) {
-			if (mouse.estado != 2) {
-				mouse.estado = 0;
+		//Juego normal
+		if (!pausa_total) {
+			//Dibujar Planta elegida/ Pala
+			if (planta_elegida) {
+				if (planta_elegida >= 1 && planta_elegida <= 8) {
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_dia, al_map_rgba(165, 165, 165, 200), (planta_elegida - 1) * 90, 0, 90, 90, mouse.x - 45, mouse.y - 45, 0);
+					return;
+				}
+				else if (planta_elegida >= 9 && planta_elegida <= 16) {
+					al_draw_tinted_bitmap_region((ALLEGRO_BITMAP*)b.plantas_noche, al_map_rgba(165, 165, 165, 200), (planta_elegida - 9) * 90, 0, 90, 90, mouse.x - 45, mouse.y - 45, 0);
+					return;
+				}
+				else if (planta_elegida == -1) {
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 110, 0, 110, 110, LIM_SEM * 110 + 150, 0, 0);
+					al_draw_bitmap_region((ALLEGRO_BITMAP*)b.hud_juego_bitmap, 220, 0, 110, 110, mouse.x - 55, mouse.y - 55, 0);
+					return;
+				}
 			}
-			for (int i{ 0 }; i <= LIM_SEM; i++) {
-				if (mouse.x >= 150 + i * 110 && mouse.x < 260 + i * 110) {
-					if (i < LIM_SEM && semillero[i].recarga == 0 && semillero[i].plant >= 0) {
-						if (mouse.estado == 0)
-							mouse.estado = 1;
-					}
-					else if (i == LIM_SEM) {
-						if (mouse.estado == 0)
-							mouse.estado = 1;
+
+			if (mouse.y < 110) {
+				for (int i{ 0 }; i <= LIM_SEM; i++) {
+					if (mouse.x >= 150 + i * 110 && mouse.x < 260 + i * 110) {
+						if (i < LIM_SEM && semillero[i].recarga == 0 && semillero[i].plant >= 0) {
+							if (mouse.estado == 0)
+								mouse.estado = 1;
+						}
+						else if (i == LIM_SEM) {
+							if (mouse.estado == 0)
+								mouse.estado = 1;
+						}
 					}
 				}
 			}
-		}
-		else {
-			if (mouse.estado != 2) {
-				mouse.estado = 0;
+			else {
+				if (mouse.estado != MOUSE_EST_CLICK) {
+					mouse.estado = MOUSE_EST_NORMAL;
+				}
 			}
+		}
+		//Menú pausa
+		else {
+			//Botón continuar
+			if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 &&
+				mouse.y >= 280 && mouse.y < 365 && mouse.estado != MOUSE_EST_CLICK) {
+				mouse.estado = MOUSE_EST_APUNTA;
+			}
+			//Botón reiniciar
+			if (mouse.x >= RESOL_X / 2 - 101 && mouse.x < RESOL_X / 2 + 101 &&
+				mouse.y >= 375 && mouse.y < 460 && mouse.estado != MOUSE_EST_CLICK) {
+				mouse.estado = MOUSE_EST_APUNTA;
+			}
+			//Botón volumen
+			if (mouse.x >= RESOL_X / 2 - 105 && mouse.x < RESOL_X / 2 - 5 &&
+				mouse.y >= 460 && mouse.y < 555 && mouse.estado != MOUSE_EST_CLICK) {
+				mouse.estado = MOUSE_EST_APUNTA;
+			}
+			//Botón casa
+			if (mouse.x >= RESOL_X / 2 && mouse.x < RESOL_X / 2 + 100 &&
+				mouse.y >= 460 && mouse.y < 555 && mouse.estado != MOUSE_EST_CLICK) {
+				mouse.estado = MOUSE_EST_APUNTA;
+			}
+		}
+		if (mouse.x >= RESOL_X - 110 && mouse.x < RESOL_X && mouse.estado != 2) {
+			mouse.estado = MOUSE_EST_APUNTA;
 		}
 		break;
 	}
@@ -4771,6 +5543,14 @@ void guardar_record(Record rec) {
 			}
 			ant = comp;
 		}
+		while (cant < CANT_REC) {
+			strcpy(comp.nombre, "AAA");
+			comp.puntos = 0;
+			comp.tiempo = 0;
+			fwrite(&comp, sizeof(Record), 1, temp);
+			std::cout << comp.nombre << "\t" << comp.puntos << std::endl;
+			cant++;
+		}
 		fclose(records);
 		remove("marcadorPvZ.bin");
 	}
@@ -4795,6 +5575,13 @@ void cargar_record() {
 			i++;
 		}
 		fclose(records);
+	}
+	strcpy(aux.nombre, "AAA");
+	aux.puntos = 0;
+	aux.tiempo = 0;
+	while (i < CANT_REC) {
+		tabla[i] = aux;
+		i++;
 	}
 }
 

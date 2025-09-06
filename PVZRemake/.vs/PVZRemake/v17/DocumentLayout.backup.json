@@ -1,9 +1,9 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\",
+  "WorkspaceRootPath": "C:\\Users\\rodri\\Desktop\\Equipo-2-ISC-2-A\\PVZRemake\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{37189D91-B37C-4F75-8EBE-BCB001111E90}|PVZRemake.vcxproj|C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "AbsoluteMoniker": "D:0:0:{37189D91-B37C-4F75-8EBE-BCB001111E90}|PVZRemake.vcxproj|C:\\Users\\rodri\\Desktop\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{37189D91-B37C-4F75-8EBE-BCB001111E90}|PVZRemake.vcxproj|solutionrelative:PVZRemake.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     }
   ],
@@ -52,11 +52,11 @@
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "PVZRemake.cpp",
-              "DocumentMoniker": "C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp",
+              "DocumentMoniker": "C:\\Users\\rodri\\Desktop\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp",
               "RelativeDocumentMoniker": "PVZRemake.cpp",
-              "ToolTip": "C:\\Users\\rodri\\OneDrive\\Documentos\\GitHub\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp*",
-              "RelativeToolTip": "PVZRemake.cpp*",
-              "ViewState": "AgIAAMISAAAAAAAAAAAcwM4SAACNAAAAAAAAAA==",
+              "ToolTip": "C:\\Users\\rodri\\Desktop\\Equipo-2-ISC-2-A\\PVZRemake\\PVZRemake.cpp",
+              "RelativeToolTip": "PVZRemake.cpp",
+              "ViewState": "AgIAAMABAAAAAAAAAAAQwNQBAAAtAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
               "WhenOpened": "2025-03-14T15:30:23.921Z",
               "EditorCaption": ""
